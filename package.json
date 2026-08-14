@@ -1,0 +1,22 @@
+{
+  "name": "florilegium-librarium",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "types": "wrangler types --include-runtime false",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run types && npm run typecheck && npm test && wrangler deploy --dry-run",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.21.3",
+    "@cloudflare/workers-types": "^5.20260814.1",
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.123.0"
+  }
+}
