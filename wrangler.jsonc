@@ -17,7 +17,7 @@
   "vars": {
     "R2_PREFIX": "pdfs/",
     "R2_PUBLIC_BASE_URL": "https://assets.sacrumflorilegium.com/",
-    "PDFJS_BASE_URL": "https://reader.sacrumflorilegium.com/"
+    "PDFJS_BASE_URL": "https://reader.sacrumflorilegium.com/web/viewer.html"
   },
   "observability": {
     "enabled": true,
@@ -26,4 +26,3 @@
     }
   }
 }
-

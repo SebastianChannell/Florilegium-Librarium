@@ -20,7 +20,7 @@ The repository is currently named `Florilegium-Librariun`; the site and Worker u
 | R2 bucket | `sacrum-assets` |
 | Object prefix | `pdfs/` |
 | Public asset origin | `https://assets.sacrumflorilegium.com/` |
-| PDF.js reader | `https://reader.sacrumflorilegium.com/` |
+| PDF.js reader | `https://reader.sacrumflorilegium.com/web/viewer.html` |
 
 For an R2 key such as:
 
@@ -31,7 +31,7 @@ pdfs/fr-lasance/my-prayer-book.pdf
 Librarium produces this reader link:
 
 ```text
-https://reader.sacrumflorilegium.com/?file=https%3A%2F%2Fassets.sacrumflorilegium.com%2Fpdfs%2Ffr-lasance%2Fmy-prayer-book.pdf
+https://reader.sacrumflorilegium.com/web/viewer.html?file=https%3A%2F%2Fassets.sacrumflorilegium.com%2Fpdfs%2Ffr-lasance%2Fmy-prayer-book.pdf
 ```
 
 ## Development
@@ -60,4 +60,3 @@ npm run deploy
 No R2 access keys belong in this repository. Cloudflare grants the Worker direct access through the `LIBRARY_BUCKET` binding declared in `wrangler.jsonc`.
 
 To change the object prefix, public asset origin, or reader origin, update the non-secret values under `vars` in `wrangler.jsonc` and run `npm run types` before committing.
-

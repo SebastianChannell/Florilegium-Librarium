@@ -23,7 +23,7 @@ describe("Librarium Worker", () => {
     ]);
   });
 
-  it("lists R2 PDFs and builds the existing PDF.js link format", async () => {
+  it("lists R2 PDFs and builds links to the PDF.js viewer entry point", async () => {
     const response = await exports.default.fetch(
       "https://librarium.example/api/books",
     );
@@ -55,7 +55,7 @@ describe("Librarium Worker", () => {
       assetUrl:
         "https://assets.sacrumflorilegium.com/pdfs/fr-lasance/my-prayer-book.pdf",
       readerUrl:
-        "https://reader.sacrumflorilegium.com/?file=https%3A%2F%2Fassets.sacrumflorilegium.com%2Fpdfs%2Ffr-lasance%2Fmy-prayer-book.pdf",
+        "https://reader.sacrumflorilegium.com/web/viewer.html?file=https%3A%2F%2Fassets.sacrumflorilegium.com%2Fpdfs%2Ffr-lasance%2Fmy-prayer-book.pdf",
     });
   });
 
