@@ -1,0 +1,28 @@
+name: Live R2 Airtable Inventory
+
+on:
+  push:
+    branches:
+      - agent/live-r2-airtable-inventory
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query live Librarium API
+        run: |
+          python - <<'PY'
+          import json
+          import urllib.request
+
+          url = "https://librarium.sacrumflorilegium.com/api/books"
+          with urllib.request.urlopen(url, timeout=30) as response:
+              payload = json.load(response)
+
+          print("LIVE_INVENTORY_START")
+          print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+          print("LIVE_INVENTORY_END")
+          PY
