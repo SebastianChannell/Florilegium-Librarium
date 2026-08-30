@@ -57,7 +57,7 @@ describe("Librarium Worker", () => {
       (book) => book.key === "pdfs/fr-lasance/my-prayer-book.pdf",
     );
     expect(prayerBook).toMatchObject({
-      category: "Bibliotheca",
+      category: "Spiritualia",
       collection: "Fr. Lasance",
       assetUrl:
         "https://assets.sacrumflorilegium.com/pdfs/fr-lasance/my-prayer-book.pdf",

@@ -17,6 +17,23 @@ const CATEGORY_NAMES = new Map([
   ["theology", "Theologia"],
 ]);
 
+const LEGACY_CATEGORY_NAMES = new Map([
+  ["fr-bowden", "Spiritualia"],
+  ["fr-d-f-miller-cssr", "Spiritualia"],
+  ["fr-edwin-c-haungs-sj", "Spiritualia"],
+  ["fr-jose-mach-sj", "Spiritualia"],
+  ["fr-lasance", "Spiritualia"],
+  ["fr-luis-ribera-cmf", "Liturgia"],
+  ["fr-martindale-sj", "Spiritualia"],
+  ["fr-matthew-britt-osb", "Liturgia"],
+  ["pope-st-pius-x", "Theologia"],
+  ["redemptorist-fathers", "Spiritualia"],
+  ["sd-fr-william-doyle-sj", "Spiritualia"],
+  ["st-alphonsus-ligouri", "Spiritualia"],
+  ["st-bernard-clairvaux", "Spiritualia"],
+  ["st-francis-de-sales", "Spiritualia"],
+]);
+
 const SMALL_WORDS = new Set([
   "a",
   "an",
@@ -239,7 +256,12 @@ export function categoryFromObjectKey(key: string, prefix: string): string {
     return "Bibliotheca";
   }
 
-  return CATEGORY_NAMES.get(normalizeSlug(firstSegment)) ?? "Bibliotheca";
+  const normalizedSegment = normalizeSlug(firstSegment);
+  return (
+    CATEGORY_NAMES.get(normalizedSegment) ??
+    LEGACY_CATEGORY_NAMES.get(normalizedSegment) ??
+    "Bibliotheca"
+  );
 }
 
 function normalizeSlug(value: string): string {

@@ -48,8 +48,9 @@ For example, Sophocles belongs at:
 pdfs/auctores/sophocles/the-theban-plays.pdf
 ```
 
-Older PDFs stored directly under an author folder remain visible under **All
-books**, so the library can be reorganized gradually.
+The existing author folders are assigned to the four divisions without moving
+their PDFs. Any older folder that has not yet been assigned remains visible
+under **All books**, so the library can be reorganized gradually.
 
 ## Development
 
