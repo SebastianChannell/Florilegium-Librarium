@@ -1,5 +1,6 @@
 const API_PATH = "/api/books";
 const API_CACHE_SECONDS = 300;
+const API_CACHE_VERSION = "2";
 const PDF_EXTENSION = /\.pdf$/i;
 
 const CATEGORY_NAMES = new Map([
@@ -111,9 +112,9 @@ export default {
       );
     }
 
-    const cacheKey = new Request(new URL(API_PATH, request.url), {
-      method: "GET",
-    });
+    const cacheUrl = new URL(API_PATH, request.url);
+    cacheUrl.searchParams.set("catalog", API_CACHE_VERSION);
+    const cacheKey = new Request(cacheUrl, { method: "GET" });
 
     try {
       const cached = await caches.default.match(cacheKey);
