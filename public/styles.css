@@ -274,6 +274,97 @@ main {
   filter: invert(0.75);
 }
 
+.category-browser {
+  margin-top: 1.65rem;
+}
+
+.category-browser-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.55rem;
+}
+
+.category-browser-heading h2 {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--serif);
+  font-size: 0.82rem;
+  font-weight: 400;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.show-all-categories {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.category-list {
+  border-bottom: 1px solid var(--line);
+}
+
+.category-option {
+  display: flex;
+  width: 100%;
+  min-height: 3.15rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.55rem 0.15rem;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.category-option:hover,
+.category-option:active,
+.category-option[aria-pressed="true"] {
+  background: var(--surface-hover);
+}
+
+.category-option[aria-pressed="true"] {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.category-name {
+  font-family: var(--serif);
+  font-size: 1.03rem;
+}
+
+.category-name::before {
+  margin-right: 0.65rem;
+  color: var(--accent);
+  content: "•";
+}
+
+.category-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  color: var(--faint);
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.category-meta span:last-child {
+  color: var(--accent);
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
 .browse-tools {
   display: flex;
   align-items: center;
@@ -464,6 +555,8 @@ main {
 .book-link:focus-visible,
 .wordmark:focus-visible,
 .retry-button:focus-visible,
+.category-option:focus-visible,
+.show-all-categories:focus-visible,
 .sort-control select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;

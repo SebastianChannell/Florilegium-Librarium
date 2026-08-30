@@ -61,9 +61,36 @@
               inputmode="search"
               autocomplete="off"
               spellcheck="false"
-              placeholder="Search title or collection"
+              placeholder="Search title, author, or collection"
             >
           </form>
+
+          <nav class="category-browser" aria-labelledby="category-heading">
+            <div class="category-browser-heading">
+              <h2 id="category-heading">Collectiones</h2>
+              <button id="show-all-categories" class="show-all-categories" type="button" hidden>
+                All books
+              </button>
+            </div>
+            <div id="category-list" class="category-list">
+              <button class="category-option" type="button" data-category="Liturgia" aria-pressed="false">
+                <span class="category-name">Liturgia</span>
+                <span class="category-meta"><span class="category-count">0</span><span aria-hidden="true">›</span></span>
+              </button>
+              <button class="category-option" type="button" data-category="Theologia" aria-pressed="false">
+                <span class="category-name">Theologia</span>
+                <span class="category-meta"><span class="category-count">0</span><span aria-hidden="true">›</span></span>
+              </button>
+              <button class="category-option" type="button" data-category="Spiritualia" aria-pressed="false">
+                <span class="category-name">Spiritualia</span>
+                <span class="category-meta"><span class="category-count">0</span><span aria-hidden="true">›</span></span>
+              </button>
+              <button class="category-option" type="button" data-category="Auctores" aria-pressed="false">
+                <span class="category-name">Auctores</span>
+                <span class="category-meta"><span class="category-count">0</span><span aria-hidden="true">›</span></span>
+              </button>
+            </div>
+          </nav>
 
           <div class="browse-tools">
             <p id="result-count" class="result-count" aria-live="polite">Loading books…</p>

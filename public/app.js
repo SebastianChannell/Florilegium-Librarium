@@ -4,6 +4,9 @@ const sortSelect = requiredElement("sort-select");
 const resultCount = requiredElement("result-count");
 const statusMessage = requiredElement("status-message");
 const libraryList = requiredElement("library-list");
+const categoryList = requiredElement("category-list");
+const showAllCategories = requiredElement("show-all-categories");
+const categoryOptions = [...categoryList.querySelectorAll("[data-category]")];
 
 const titleCollator = new Intl.Collator("en", {
   numeric: true,
@@ -13,6 +16,7 @@ const titleCollator = new Intl.Collator("en", {
 const state = {
   books: [],
   query: new URLSearchParams(window.location.search).get("q")?.trim() ?? "",
+  category: new URLSearchParams(window.location.search).get("category")?.trim() ?? "",
   sort: "title",
 };
 
@@ -25,7 +29,24 @@ searchForm.addEventListener("submit", (event) => {
 
 searchInput.addEventListener("input", () => {
   state.query = searchInput.value.trim();
-  updateAddressBar(state.query);
+  updateAddressBar();
+  renderBooks();
+});
+
+categoryList.addEventListener("click", (event) => {
+  const option = event.target.closest("[data-category]");
+  if (!option) {
+    return;
+  }
+
+  state.category = option.dataset.category ?? "";
+  updateAddressBar();
+  renderBooks();
+});
+
+showAllCategories.addEventListener("click", () => {
+  state.category = "";
+  updateAddressBar();
   renderBooks();
 });
 
@@ -54,6 +75,7 @@ async function loadBooks() {
     }
 
     state.books = payload.books.filter(isBook);
+    renderCategoryCounts();
     renderBooks();
   } catch (error) {
     console.error("Could not load Librarium", error);
@@ -65,11 +87,15 @@ function renderBooks() {
   const query = normalizeSearchValue(state.query);
   const visibleBooks = state.books
     .filter((book) => {
+      if (state.category && book.category !== state.category) {
+        return false;
+      }
+
       if (!query) {
         return true;
       }
 
-      return normalizeSearchValue(`${book.title} ${book.collection}`).includes(query);
+      return normalizeSearchValue(`${book.title} ${book.collection} ${book.category}`).includes(query);
     })
     .sort((left, right) => {
       if (state.sort === "recent") {
@@ -88,7 +114,12 @@ function renderBooks() {
   }
 
   libraryList.append(fragment);
-  resultCount.textContent = resultCountText(visibleBooks.length, state.books.length, Boolean(query));
+  resultCount.textContent = resultCountText(
+    visibleBooks.length,
+    state.books.length,
+    Boolean(query || state.category),
+  );
+  renderCategorySelection();
 
   if (visibleBooks.length === 0) {
     renderEmptyState(Boolean(query));
@@ -97,6 +128,31 @@ function renderBooks() {
 
   statusMessage.hidden = true;
   libraryList.hidden = false;
+}
+
+function renderCategoryCounts() {
+  const counts = new Map();
+  for (const book of state.books) {
+    counts.set(book.category, (counts.get(book.category) ?? 0) + 1);
+  }
+
+  for (const option of categoryOptions) {
+    const count = option.querySelector(".category-count");
+    if (count) {
+      count.textContent = String(counts.get(option.dataset.category) ?? 0);
+    }
+  }
+}
+
+function renderCategorySelection() {
+  for (const option of categoryOptions) {
+    option.setAttribute(
+      "aria-pressed",
+      String(option.dataset.category === state.category),
+    );
+  }
+
+  showAllCategories.hidden = !state.category;
 }
 
 function createBookRow(book) {
@@ -200,12 +256,17 @@ function normalizeSearchValue(value) {
     .trim();
 }
 
-function updateAddressBar(query) {
+function updateAddressBar() {
   const url = new URL(window.location.href);
-  if (query) {
-    url.searchParams.set("q", query);
+  if (state.query) {
+    url.searchParams.set("q", state.query);
   } else {
     url.searchParams.delete("q");
+  }
+  if (state.category) {
+    url.searchParams.set("category", state.category);
+  } else {
+    url.searchParams.delete("category");
   }
   window.history.replaceState(null, "", url);
 }
@@ -215,6 +276,7 @@ function isBook(value) {
     value &&
     typeof value.key === "string" &&
     typeof value.title === "string" &&
+    typeof value.category === "string" &&
     typeof value.collection === "string" &&
     typeof value.readerUrl === "string" &&
     typeof value.uploaded === "string"
@@ -228,4 +290,3 @@ function requiredElement(id) {
   }
   return element;
 }
-

@@ -2,6 +2,21 @@ const API_PATH = "/api/books";
 const API_CACHE_SECONDS = 300;
 const PDF_EXTENSION = /\.pdf$/i;
 
+const CATEGORY_NAMES = new Map([
+  ["auctores", "Auctores"],
+  ["authors", "Auctores"],
+  ["classics", "Auctores"],
+  ["liturgia", "Liturgia"],
+  ["liturgical", "Liturgia"],
+  ["liturgy", "Liturgia"],
+  ["spiritual", "Spiritualia"],
+  ["spiritualia", "Spiritualia"],
+  ["spirituality", "Spiritualia"],
+  ["theologia", "Theologia"],
+  ["theological", "Theologia"],
+  ["theology", "Theologia"],
+]);
+
 const SMALL_WORDS = new Set([
   "a",
   "an",
@@ -31,6 +46,7 @@ const SPECIAL_WORDS = new Map([
 export interface LibraryBook {
   key: string;
   title: string;
+  category: string;
   collection: string;
   assetUrl: string;
   readerUrl: string;
@@ -166,6 +182,7 @@ export async function listBooks(
       books.push({
         key: object.key,
         title: titleFromObjectKey(object.key),
+        category: categoryFromObjectKey(object.key, config.prefix),
         collection: collectionFromObjectKey(object.key, config.prefix),
         assetUrl,
         readerUrl: buildPdfjsUrl(config.pdfjsBaseUrl, assetUrl),
@@ -212,6 +229,24 @@ export function collectionFromObjectKey(key: string, prefix: string): string {
   }
 
   return humanizeSlug(segments.at(-2) ?? "") || "Library";
+}
+
+export function categoryFromObjectKey(key: string, prefix: string): string {
+  const relativeKey = key.startsWith(prefix) ? key.slice(prefix.length) : key;
+  const firstSegment = relativeKey.split("/").filter(Boolean).at(0);
+
+  if (!firstSegment) {
+    return "Bibliotheca";
+  }
+
+  return CATEGORY_NAMES.get(normalizeSlug(firstSegment)) ?? "Bibliotheca";
+}
+
+function normalizeSlug(value: string): string {
+  return safeDecodeURIComponent(value)
+    .toLocaleLowerCase("en-US")
+    .replace(/[_\s]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function humanizeSlug(value: string): string {
@@ -278,4 +313,3 @@ function responseForRequest(
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-

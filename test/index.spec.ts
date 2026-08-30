@@ -15,7 +15,12 @@ describe("Librarium Worker", () => {
         { httpMetadata: { contentType: "application/pdf" } },
       ),
       env.LIBRARY_BUCKET.put(
-        "pdfs/liturgical/liber-usualis-1961.pdf",
+        "pdfs/liturgia/benedictines-of-solesmes/liber-usualis-1961.pdf",
+        "test-pdf",
+        { httpMetadata: { contentType: "application/pdf" } },
+      ),
+      env.LIBRARY_BUCKET.put(
+        "pdfs/auctores/sophocles/the-theban-plays.pdf",
         "test-pdf",
         { httpMetadata: { contentType: "application/pdf" } },
       ),
@@ -41,21 +46,41 @@ describe("Librarium Worker", () => {
       }>;
     }>();
 
-    expect(payload.count).toBe(2);
+    expect(payload.count).toBe(3);
     expect(payload.books.map((book) => book.title)).toEqual([
       "Liber Usualis 1961",
       "My Prayer Book",
+      "The Theban Plays",
     ]);
 
     const prayerBook = payload.books.find(
       (book) => book.key === "pdfs/fr-lasance/my-prayer-book.pdf",
     );
     expect(prayerBook).toMatchObject({
+      category: "Bibliotheca",
       collection: "Fr. Lasance",
       assetUrl:
         "https://assets.sacrumflorilegium.com/pdfs/fr-lasance/my-prayer-book.pdf",
       readerUrl:
         "https://reader.sacrumflorilegium.com/web/viewer.html?file=https%3A%2F%2Fassets.sacrumflorilegium.com%2Fpdfs%2Ffr-lasance%2Fmy-prayer-book.pdf",
+    });
+
+    const sophocles = payload.books.find(
+      (book) => book.key === "pdfs/auctores/sophocles/the-theban-plays.pdf",
+    );
+    expect(sophocles).toMatchObject({
+      category: "Auctores",
+      collection: "Sophocles",
+    });
+
+    const liberUsualis = payload.books.find(
+      (book) =>
+        book.key ===
+        "pdfs/liturgia/benedictines-of-solesmes/liber-usualis-1961.pdf",
+    );
+    expect(liberUsualis).toMatchObject({
+      category: "Liturgia",
+      collection: "Benedictines of Solesmes",
     });
   });
 

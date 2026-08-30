@@ -9,6 +9,8 @@ The repository is currently named `Florilegium-Librariun`; the site and Worker u
 - Reads the live R2 object list directly through a Worker binding.
 - Includes every `.pdf` object below the configured `pdfs/` prefix.
 - Derives a readable title and collection label from each R2 object key.
+- Recognizes the major divisions `Liturgia`, `Theologia`, `Spiritualia`, and
+  `Auctores` from the first folder below `pdfs/`.
 - Sends every book to the existing PDF.js reader rather than opening the raw PDF.
 - Provides a compact mobile list, instant search, and A–Z or recently-added sorting.
 - Caches the generated API response at the edge for five minutes, so new R2 books appear automatically without maintaining a second index.
@@ -33,6 +35,21 @@ Librarium produces this reader link:
 ```text
 https://reader.sacrumflorilegium.com/web/viewer.html?file=https%3A%2F%2Fassets.sacrumflorilegium.com%2Fpdfs%2Ffr-lasance%2Fmy-prayer-book.pdf
 ```
+
+For categorized works, use this hierarchy:
+
+```text
+pdfs/<division>/<author-or-collection>/<book>.pdf
+```
+
+For example, Sophocles belongs at:
+
+```text
+pdfs/auctores/sophocles/the-theban-plays.pdf
+```
+
+Older PDFs stored directly under an author folder remain visible under **All
+books**, so the library can be reorganized gradually.
 
 ## Development
 
