@@ -1,39 +1,11 @@
+import { BOOK_CATALOG, BOOKS_BY_SLUG, canonicalPdfKey } from "./catalog";
+
 const API_PATH = "/api/books";
 const API_CACHE_SECONDS = 300;
-const API_CACHE_VERSION = "2";
+const API_CACHE_VERSION = "3";
 const PDF_EXTENSION = /\.pdf$/i;
-
-const CATEGORY_NAMES = new Map([
-  ["auctores", "Auctores"],
-  ["authors", "Auctores"],
-  ["classics", "Auctores"],
-  ["liturgia", "Liturgia"],
-  ["liturgical", "Liturgia"],
-  ["liturgy", "Liturgia"],
-  ["spiritual", "Spiritualia"],
-  ["spiritualia", "Spiritualia"],
-  ["spirituality", "Spiritualia"],
-  ["theologia", "Theologia"],
-  ["theological", "Theologia"],
-  ["theology", "Theologia"],
-]);
-
-const LEGACY_CATEGORY_NAMES = new Map([
-  ["fr-bowden", "Spiritualia"],
-  ["fr-d-f-miller-cssr", "Spiritualia"],
-  ["fr-edwin-c-haungs-sj", "Spiritualia"],
-  ["fr-jose-mach-sj", "Spiritualia"],
-  ["fr-lasance", "Spiritualia"],
-  ["fr-luis-ribera-cmf", "Liturgia"],
-  ["fr-martindale-sj", "Spiritualia"],
-  ["fr-matthew-britt-osb", "Liturgia"],
-  ["pope-st-pius-x", "Theologia"],
-  ["redemptorist-fathers", "Spiritualia"],
-  ["sd-fr-william-doyle-sj", "Spiritualia"],
-  ["st-alphonsus-ligouri", "Spiritualia"],
-  ["st-bernard-clairvaux", "Spiritualia"],
-  ["st-francis-de-sales", "Spiritualia"],
-]);
+const MIGRATION_PATH = "/api/maintenance/flatten-pdfs";
+const MIGRATION_TOKEN_HASH = "7bc09ab5a0cbb067b15df56db90658b5fed3ffaa6bb61c6c798b4b39e578c3a2";
 
 const SMALL_WORDS = new Set([
   "a",
@@ -63,7 +35,9 @@ const SPECIAL_WORDS = new Map([
 
 export interface LibraryBook {
   key: string;
+  slug: string;
   title: string;
+  author: string;
   category: string;
   collection: string;
   assetUrl: string;
@@ -91,6 +65,10 @@ export default {
     ctx: ExecutionContext,
   ): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === MIGRATION_PATH) {
+      return flattenPdfMigration(request, env.LIBRARY_BUCKET);
+    }
 
     if (url.pathname !== API_PATH) {
       return new Response("Not found", {
@@ -197,14 +175,20 @@ export async function listBooks(
       }
 
       const assetUrl = buildPublicUrl(config.publicBaseUrl, object.key);
+      const slug = slugFromObjectKey(object.key);
+      const metadata = BOOKS_BY_SLUG.get(slug);
       books.push({
         key: object.key,
-        title: titleFromObjectKey(object.key),
-        category: categoryFromObjectKey(object.key, config.prefix),
-        collection: collectionFromObjectKey(object.key, config.prefix),
+        slug,
+        title: metadata?.title ?? titleFromObjectKey(object.key),
+        author: metadata?.author ?? "",
+        category: metadata?.classification ?? "Bibliotheca",
+        collection: metadata?.author ?? collectionFromObjectKey(object.key, config.prefix),
         assetUrl,
         readerUrl: buildPdfjsUrl(config.pdfjsBaseUrl, assetUrl),
-        uploaded: object.uploaded.toISOString(),
+        uploaded: metadata
+          ? `${metadata.dateAdded}T00:00:00.000Z`
+          : object.uploaded.toISOString(),
         size: object.size,
       });
     }
@@ -238,6 +222,11 @@ export function titleFromObjectKey(key: string): string {
   return humanizeSlug(withoutExtension) || "Untitled Book";
 }
 
+export function slugFromObjectKey(key: string): string {
+  const filename = key.split("/").at(-1) ?? key;
+  return normalizeSlug(filename.replace(PDF_EXTENSION, ""));
+}
+
 export function collectionFromObjectKey(key: string, prefix: string): string {
   const relativeKey = key.startsWith(prefix) ? key.slice(prefix.length) : key;
   const segments = relativeKey.split("/").filter(Boolean);
@@ -249,27 +238,115 @@ export function collectionFromObjectKey(key: string, prefix: string): string {
   return humanizeSlug(segments.at(-2) ?? "") || "Library";
 }
 
-export function categoryFromObjectKey(key: string, prefix: string): string {
-  const relativeKey = key.startsWith(prefix) ? key.slice(prefix.length) : key;
-  const firstSegment = relativeKey.split("/").filter(Boolean).at(0);
-
-  if (!firstSegment) {
-    return "Bibliotheca";
-  }
-
-  const normalizedSegment = normalizeSlug(firstSegment);
-  return (
-    CATEGORY_NAMES.get(normalizedSegment) ??
-    LEGACY_CATEGORY_NAMES.get(normalizedSegment) ??
-    "Bibliotheca"
-  );
-}
-
 function normalizeSlug(value: string): string {
   return safeDecodeURIComponent(value)
     .toLocaleLowerCase("en-US")
     .replace(/[_\s]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+async function flattenPdfMigration(
+  request: Request,
+  bucket: R2Bucket,
+): Promise<Response> {
+  if (request.method !== "POST") {
+    return new Response("Method not allowed", {
+      status: 405,
+      headers: { Allow: "POST" },
+    });
+  }
+
+  const token = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
+  if (!token || (await sha256Hex(token)) !== MIGRATION_TOKEN_HASH) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  const results: Array<{
+    slug: string;
+    status: "moved" | "already-flat" | "failed";
+    error?: string;
+  }> = [];
+
+  for (let index = 0; index < BOOK_CATALOG.length; index += 3) {
+    const group = BOOK_CATALOG.slice(index, index + 3);
+    const groupResults = await Promise.all(
+      group.map(async (book) => {
+        try {
+          return await movePdf(bucket, book.slug, book.legacyKey);
+        } catch (error: unknown) {
+          return {
+            slug: book.slug,
+            status: "failed" as const,
+            error: errorMessage(error),
+          };
+        }
+      }),
+    );
+    results.push(...groupResults);
+  }
+
+  const failed = results.filter((result) => result.status === "failed");
+  return Response.json(
+    {
+      ok: failed.length === 0,
+      moved: results.filter((result) => result.status === "moved").length,
+      alreadyFlat: results.filter((result) => result.status === "already-flat").length,
+      failed,
+    },
+    {
+      status: failed.length === 0 ? 200 : 500,
+      headers: { "Cache-Control": "no-store" },
+    },
+  );
+}
+
+export async function movePdf(
+  bucket: R2Bucket,
+  slug: string,
+  legacyKey: string,
+): Promise<{ slug: string; status: "moved" | "already-flat" }> {
+  const targetKey = canonicalPdfKey(slug);
+  const [source, target] = await Promise.all([
+    bucket.head(legacyKey),
+    bucket.head(targetKey),
+  ]);
+
+  if (!source) {
+    if (target) {
+      return { slug, status: "already-flat" };
+    }
+    throw new Error(`Missing source object: ${legacyKey}`);
+  }
+
+  if (target && target.size !== source.size) {
+    throw new Error(`Target exists with a different size: ${targetKey}`);
+  }
+
+  if (!target) {
+    const object = await bucket.get(legacyKey);
+    if (!object) {
+      throw new Error(`Could not read source object: ${legacyKey}`);
+    }
+
+    await bucket.put(targetKey, object.body, {
+      httpMetadata: object.httpMetadata,
+      customMetadata: object.customMetadata,
+    });
+
+    const copied = await bucket.head(targetKey);
+    if (!copied || copied.size !== source.size) {
+      throw new Error(`Copy verification failed: ${targetKey}`);
+    }
+  }
+
+  await bucket.delete(legacyKey);
+  return { slug, status: "moved" };
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function humanizeSlug(value: string): string {

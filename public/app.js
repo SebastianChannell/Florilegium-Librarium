@@ -95,7 +95,7 @@ function renderBooks() {
         return true;
       }
 
-      return normalizeSearchValue(`${book.title} ${book.collection} ${book.category}`).includes(query);
+      return normalizeSearchValue(`${book.title} ${book.author} ${book.collection} ${book.category}`).includes(query);
     })
     .sort((left, right) => {
       if (state.sort === "recent") {
@@ -275,7 +275,9 @@ function isBook(value) {
   return (
     value &&
     typeof value.key === "string" &&
+    typeof value.slug === "string" &&
     typeof value.title === "string" &&
+    typeof value.author === "string" &&
     typeof value.category === "string" &&
     typeof value.collection === "string" &&
     typeof value.readerUrl === "string" &&

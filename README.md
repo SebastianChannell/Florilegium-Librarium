@@ -8,9 +8,8 @@ The repository is currently named `Florilegium-Librariun`; the site and Worker u
 
 - Reads the live R2 object list directly through a Worker binding.
 - Includes every `.pdf` object below the configured `pdfs/` prefix.
-- Derives a readable title and collection label from each R2 object key.
-- Recognizes the major divisions `Liturgia`, `Theologia`, `Spiritualia`, and
-  `Auctores` from the first folder below `pdfs/`.
+- Uses the canonical Airtable slug to match each R2 object with its title,
+  author, classification, and date-added metadata.
 - Sends every book to the existing PDF.js reader rather than opening the raw PDF.
 - Provides a compact mobile list, instant search, and A–Z or recently-added sorting.
 - Caches the generated API response at the edge for five minutes, so new R2 books appear automatically without maintaining a second index.
@@ -24,33 +23,27 @@ The repository is currently named `Florilegium-Librariun`; the site and Worker u
 | Public asset origin | `https://assets.sacrumflorilegium.com/` |
 | PDF.js reader | `https://reader.sacrumflorilegium.com/web/viewer.html` |
 
-For an R2 key such as:
+Every PDF now uses the Airtable slug as its filename:
 
 ```text
-pdfs/fr-lasance/my-prayer-book.pdf
+pdfs/my-prayer-book.pdf
 ```
 
 Librarium produces this reader link:
 
 ```text
-https://reader.sacrumflorilegium.com/web/viewer.html?file=https%3A%2F%2Fassets.sacrumflorilegium.com%2Fpdfs%2Ffr-lasance%2Fmy-prayer-book.pdf
+https://reader.sacrumflorilegium.com/web/viewer.html?file=https%3A%2F%2Fassets.sacrumflorilegium.com%2Fpdfs%2Fmy-prayer-book.pdf
 ```
 
-For categorized works, use this hierarchy:
+The asset namespace is deliberately flat and predictable:
 
 ```text
-pdfs/<division>/<author-or-collection>/<book>.pdf
+pdfs/<slug>.pdf
+covers/<slug>.webp
 ```
 
-For example, Sophocles belongs at:
-
-```text
-pdfs/auctores/sophocles/the-theban-plays.pdf
-```
-
-The existing author folders are assigned to the four divisions without moving
-their PDFs. Any older folder that has not yet been assigned remains visible
-under **All books**, so the library can be reorganized gradually.
+`src/catalog.ts` is the deployment snapshot of the Airtable catalogue. Airtable
+remains the canonical source; sync this file whenever catalogue records change.
 
 ## Development
 

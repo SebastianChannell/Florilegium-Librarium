@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { env, exports } from "cloudflare:workers";
+import { movePdf } from "../src/index";
 
 describe("Librarium Worker", () => {
   beforeAll(async () => {
@@ -10,17 +11,17 @@ describe("Librarium Worker", () => {
 
     await Promise.all([
       env.LIBRARY_BUCKET.put(
-        "pdfs/fr-lasance/my-prayer-book.pdf",
+        "pdfs/my-prayer-book.pdf",
         "test-pdf",
         { httpMetadata: { contentType: "application/pdf" } },
       ),
       env.LIBRARY_BUCKET.put(
-        "pdfs/liturgia/benedictines-of-solesmes/liber-usualis-1961.pdf",
+        "pdfs/liber-usualis-1961.pdf",
         "test-pdf",
         { httpMetadata: { contentType: "application/pdf" } },
       ),
       env.LIBRARY_BUCKET.put(
-        "pdfs/auctores/sophocles/the-theban-plays.pdf",
+        "pdfs/the-theban-plays.pdf",
         "test-pdf",
         { httpMetadata: { contentType: "application/pdf" } },
       ),
@@ -48,35 +49,31 @@ describe("Librarium Worker", () => {
 
     expect(payload.count).toBe(3);
     expect(payload.books.map((book) => book.title)).toEqual([
-      "Liber Usualis 1961",
-      "My Prayer Book",
+      "My Prayer-Book",
+      "The Liber Usualis (1961)",
       "The Theban Plays",
     ]);
 
-    const prayerBook = payload.books.find(
-      (book) => book.key === "pdfs/fr-lasance/my-prayer-book.pdf",
-    );
+    const prayerBook = payload.books.find((book) => book.key === "pdfs/my-prayer-book.pdf");
     expect(prayerBook).toMatchObject({
       category: "Spiritualia",
-      collection: "Fr. Lasance",
-      assetUrl:
-        "https://assets.sacrumflorilegium.com/pdfs/fr-lasance/my-prayer-book.pdf",
+      collection: "Fr. F. X. Lasance",
+      assetUrl: "https://assets.sacrumflorilegium.com/pdfs/my-prayer-book.pdf",
       readerUrl:
-        "https://reader.sacrumflorilegium.com/web/viewer.html?file=https%3A%2F%2Fassets.sacrumflorilegium.com%2Fpdfs%2Ffr-lasance%2Fmy-prayer-book.pdf",
+        "https://reader.sacrumflorilegium.com/web/viewer.html?file=https%3A%2F%2Fassets.sacrumflorilegium.com%2Fpdfs%2Fmy-prayer-book.pdf",
     });
 
     const sophocles = payload.books.find(
-      (book) => book.key === "pdfs/auctores/sophocles/the-theban-plays.pdf",
+      (book) => book.key === "pdfs/the-theban-plays.pdf",
     );
     expect(sophocles).toMatchObject({
-      category: "Auctores",
-      collection: "Sophocles",
+      category: "Bibliotheca",
+      collection: "Library",
     });
 
     const liberUsualis = payload.books.find(
       (book) =>
-        book.key ===
-        "pdfs/liturgia/benedictines-of-solesmes/liber-usualis-1961.pdf",
+        book.key === "pdfs/liber-usualis-1961.pdf",
     );
     expect(liberUsualis).toMatchObject({
       category: "Liturgia",
@@ -96,5 +93,21 @@ describe("Librarium Worker", () => {
     });
     expect(post.status).toBe(405);
     expect(post.headers.get("allow")).toBe("GET, HEAD");
+  });
+
+  it("copies a legacy PDF, verifies it, and removes only the old key", async () => {
+    await env.LIBRARY_BUCKET.put("pdfs/legacy/example.pdf", "migration-pdf", {
+      httpMetadata: { contentType: "application/pdf" },
+    });
+
+    const result = await movePdf(
+      env.LIBRARY_BUCKET,
+      "example",
+      "pdfs/legacy/example.pdf",
+    );
+
+    expect(result).toEqual({ slug: "example", status: "moved" });
+    expect(await env.LIBRARY_BUCKET.head("pdfs/legacy/example.pdf")).toBeNull();
+    expect(await env.LIBRARY_BUCKET.get("pdfs/example.pdf")).not.toBeNull();
   });
 });
