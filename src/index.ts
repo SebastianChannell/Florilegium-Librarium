@@ -1,11 +1,9 @@
-import { BOOK_CATALOG, BOOKS_BY_SLUG, canonicalPdfKey } from "./catalog";
+import { BOOKS_BY_SLUG } from "./catalog";
 
 const API_PATH = "/api/books";
 const API_CACHE_SECONDS = 300;
-const API_CACHE_VERSION = "3";
+const API_CACHE_VERSION = "4";
 const PDF_EXTENSION = /\.pdf$/i;
-const MIGRATION_PATH = "/api/maintenance/flatten-pdfs";
-const MIGRATION_TOKEN_HASH = "7bc09ab5a0cbb067b15df56db90658b5fed3ffaa6bb61c6c798b4b39e578c3a2";
 
 const SMALL_WORDS = new Set([
   "a",
@@ -65,10 +63,6 @@ export default {
     ctx: ExecutionContext,
   ): Promise<Response> {
     const url = new URL(request.url);
-
-    if (url.pathname === MIGRATION_PATH) {
-      return flattenPdfMigration(request, env.LIBRARY_BUCKET);
-    }
 
     if (url.pathname !== API_PATH) {
       return new Response("Not found", {
@@ -243,110 +237,6 @@ function normalizeSlug(value: string): string {
     .toLocaleLowerCase("en-US")
     .replace(/[_\s]+/g, "-")
     .replace(/^-+|-+$/g, "");
-}
-
-async function flattenPdfMigration(
-  request: Request,
-  bucket: R2Bucket,
-): Promise<Response> {
-  if (request.method !== "POST") {
-    return new Response("Method not allowed", {
-      status: 405,
-      headers: { Allow: "POST" },
-    });
-  }
-
-  const token = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
-  if (!token || (await sha256Hex(token)) !== MIGRATION_TOKEN_HASH) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-
-  const results: Array<{
-    slug: string;
-    status: "moved" | "already-flat" | "failed";
-    error?: string;
-  }> = [];
-
-  for (let index = 0; index < BOOK_CATALOG.length; index += 3) {
-    const group = BOOK_CATALOG.slice(index, index + 3);
-    const groupResults = await Promise.all(
-      group.map(async (book) => {
-        try {
-          return await movePdf(bucket, book.slug, book.legacyKey);
-        } catch (error: unknown) {
-          return {
-            slug: book.slug,
-            status: "failed" as const,
-            error: errorMessage(error),
-          };
-        }
-      }),
-    );
-    results.push(...groupResults);
-  }
-
-  const failed = results.filter((result) => result.status === "failed");
-  return Response.json(
-    {
-      ok: failed.length === 0,
-      moved: results.filter((result) => result.status === "moved").length,
-      alreadyFlat: results.filter((result) => result.status === "already-flat").length,
-      failed,
-    },
-    {
-      status: failed.length === 0 ? 200 : 500,
-      headers: { "Cache-Control": "no-store" },
-    },
-  );
-}
-
-export async function movePdf(
-  bucket: R2Bucket,
-  slug: string,
-  legacyKey: string,
-): Promise<{ slug: string; status: "moved" | "already-flat" }> {
-  const targetKey = canonicalPdfKey(slug);
-  const [source, target] = await Promise.all([
-    bucket.head(legacyKey),
-    bucket.head(targetKey),
-  ]);
-
-  if (!source) {
-    if (target) {
-      return { slug, status: "already-flat" };
-    }
-    throw new Error(`Missing source object: ${legacyKey}`);
-  }
-
-  if (target && target.size !== source.size) {
-    throw new Error(`Target exists with a different size: ${targetKey}`);
-  }
-
-  if (!target) {
-    const object = await bucket.get(legacyKey);
-    if (!object) {
-      throw new Error(`Could not read source object: ${legacyKey}`);
-    }
-
-    await bucket.put(targetKey, object.body, {
-      httpMetadata: object.httpMetadata,
-      customMetadata: object.customMetadata,
-    });
-
-    const copied = await bucket.head(targetKey);
-    if (!copied || copied.size !== source.size) {
-      throw new Error(`Copy verification failed: ${targetKey}`);
-    }
-  }
-
-  await bucket.delete(legacyKey);
-  return { slug, status: "moved" };
-}
-
-async function sha256Hex(value: string): Promise<string> {
-  const bytes = new TextEncoder().encode(value);
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
-  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function humanizeSlug(value: string): string {

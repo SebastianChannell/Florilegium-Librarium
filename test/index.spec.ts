@@ -1,6 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { env, exports } from "cloudflare:workers";
-import { movePdf } from "../src/index";
 
 describe("Librarium Worker", () => {
   beforeAll(async () => {
@@ -93,21 +92,5 @@ describe("Librarium Worker", () => {
     });
     expect(post.status).toBe(405);
     expect(post.headers.get("allow")).toBe("GET, HEAD");
-  });
-
-  it("copies a legacy PDF, verifies it, and removes only the old key", async () => {
-    await env.LIBRARY_BUCKET.put("pdfs/legacy/example.pdf", "migration-pdf", {
-      httpMetadata: { contentType: "application/pdf" },
-    });
-
-    const result = await movePdf(
-      env.LIBRARY_BUCKET,
-      "example",
-      "pdfs/legacy/example.pdf",
-    );
-
-    expect(result).toEqual({ slug: "example", status: "moved" });
-    expect(await env.LIBRARY_BUCKET.head("pdfs/legacy/example.pdf")).toBeNull();
-    expect(await env.LIBRARY_BUCKET.get("pdfs/example.pdf")).not.toBeNull();
   });
 });
