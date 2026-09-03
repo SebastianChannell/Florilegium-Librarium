@@ -5,6 +5,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      force_covers:
+        description: Rebuild covers that already exist
+        type: boolean
+        default: false
 
 concurrency:
   group: librarium-production
@@ -17,7 +22,7 @@ jobs:
   validate-and-deploy:
     name: Validate and deploy
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -42,3 +47,13 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Install PDF cover tools
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils webp
+
+      - name: Generate missing R2 covers
+        run: npm run covers
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FORCE_COVERS: ${{ inputs.force_covers || 'false' }}
