@@ -1,8 +1,10 @@
-import { extractText, getDocumentProxy, getMeta } from "unpdf";
+import { getDocumentProxy, getMeta } from "unpdf";
 import { AirtableClient, escapeFormula } from "./airtable";
 
 const PDF_EXTENSION = /\.pdf$/i;
-const MAX_PDF_BYTES = 75 * 1024 * 1024;
+const MAX_INSPECTION_BYTES = 25 * 1024 * 1024;
+const MAX_INSPECTION_PAGES = 6;
+const MAX_CHANGED_FILES_PER_RUN = 1;
 const SMALL_WORDS = new Set(["a", "an", "and", "at", "by", "for", "from", "in", "of", "on", "or", "the", "to", "with"]);
 
 interface IngestConfig {
@@ -32,6 +34,7 @@ export interface IngestSummary {
   updated: number;
   unchanged: number;
   failed: number;
+  deferred: number;
 }
 
 export async function ingestLibrary(
@@ -78,7 +81,10 @@ export async function ingestLibrary(
     updated: 0,
     unchanged: 0,
     failed: 0,
+    deferred: 0,
   };
+
+  let changedFilesProcessed = 0;
 
   // Sequential processing stays comfortably below Airtable's per-base rate limit.
   for (const object of objects) {
@@ -91,12 +97,28 @@ export async function ingestLibrary(
       continue;
     }
 
+    if (changedFilesProcessed >= MAX_CHANGED_FILES_PER_RUN) {
+      summary.deferred += 1;
+      continue;
+    }
+    changedFilesProcessed += 1;
+
     try {
-      const fields = await inspectPdf(bucket, object, slug, config, {
-        airtable,
-        authorByName,
-        classificationByName,
-      }, !existing);
+      let fields: Record<string, unknown>;
+      try {
+        fields = await inspectPdf(bucket, object, slug, config, {
+          airtable,
+          authorByName,
+          classificationByName,
+        }, !existing);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        fields = baseFields(object, slug, config, {
+          Title: titleFromObjectKey(object.key),
+          "Ingest Status": "Review Needed",
+          "Ingest Message": `Basic file data was imported, but PDF inspection could not be completed: ${message}`.slice(0, 5000),
+        });
+      }
 
       if (existing) {
         // A changed file refreshes only operational/file-derived fields. Curated
@@ -141,11 +163,11 @@ async function inspectPdf(
   },
   createLinks: boolean,
 ): Promise<Record<string, unknown>> {
-  if (object.size > MAX_PDF_BYTES) {
+  if (object.size > MAX_INSPECTION_BYTES) {
     return baseFields(object, slug, config, {
       Title: titleFromObjectKey(object.key),
       "Ingest Status": "Review Needed",
-      "Ingest Message": "The PDF is larger than 75 MB. Basic file data was imported; bibliographic fields require review.",
+      "Ingest Message": "The PDF is larger than 25 MB. Basic file data was imported; bibliographic fields require review.",
     });
   }
 
@@ -156,11 +178,18 @@ async function inspectPdf(
 
   const bytes = new Uint8Array(await stored.arrayBuffer());
   const pdf = await getDocumentProxy(bytes);
-  const [{ totalPages, text }, meta] = await Promise.all([
-    extractText(pdf),
-    getMeta(pdf, { parseDates: true }),
-  ]);
-  const pages = Array.isArray(text) ? text : [text];
+  const meta = await getMeta(pdf, { parseDates: true });
+  const totalPages = pdf.numPages;
+  const pages: string[] = [];
+  for (let pageNumber = 1; pageNumber <= Math.min(totalPages, MAX_INSPECTION_PAGES); pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    pages.push(content.items
+      .map((item) => ("str" in item ? item.str : ""))
+      .filter(Boolean)
+      .join(" "));
+    page.cleanup();
+  }
   const sample = pages.slice(0, 12).join("\n").slice(0, 80_000);
   const info = meta.info ?? {};
   const metadata = (meta.metadata ?? {}) as unknown as Record<string, unknown>;
