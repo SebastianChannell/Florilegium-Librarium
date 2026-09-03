@@ -1,0 +1,7 @@
+interface Env {
+  AIRTABLE_TOKEN?: string;
+  AIRTABLE_BASE_ID: string;
+  AIRTABLE_BOOKS_TABLE: string;
+  AIRTABLE_AUTHORS_TABLE: string;
+  AIRTABLE_CLASSIFICATIONS_TABLE: string;
+}

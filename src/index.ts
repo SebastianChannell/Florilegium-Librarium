@@ -1,4 +1,6 @@
 import { BOOKS_BY_SLUG } from "./catalog";
+import { AirtableClient } from "./airtable";
+import { ingestLibrary } from "./ingest";
 
 const API_PATH = "/api/books";
 const API_CACHE_SECONDS = 300;
@@ -42,6 +44,10 @@ export interface LibraryBook {
   readerUrl: string;
   uploaded: string;
   size: number;
+  subjects: string[];
+  language: string;
+  pages?: number;
+  coverUrl: string;
 }
 
 interface LibraryConfig {
@@ -55,6 +61,34 @@ interface LibraryPayload {
   count: number;
   generatedAt: string;
 }
+
+interface CatalogMetadata {
+  slug: string;
+  title: string;
+  author: string;
+  classification: string;
+  dateAdded: string;
+  subjects: string[];
+  language: string;
+  pages?: number;
+  coverUrl: string;
+}
+
+interface BookRecordFields {
+  Title?: string;
+  Authors?: string[];
+  Classification?: string[];
+  Subjects?: string[];
+  Language?: string;
+  Pages?: number;
+  "Date Added"?: string;
+  Slug?: string;
+  "Cover URL"?: string;
+  Status?: string;
+}
+
+interface AuthorRecordFields { Name?: string }
+interface ClassificationRecordFields { Class?: string }
 
 export default {
   async fetch(
@@ -94,11 +128,12 @@ export default {
         return responseForRequest(request, cached, "HIT");
       }
 
+      const catalogue = await loadCatalogue(env);
       const books = await listBooks(env.LIBRARY_BUCKET, {
         prefix: env.R2_PREFIX,
         publicBaseUrl: env.R2_PUBLIC_BASE_URL,
         pdfjsBaseUrl: env.PDFJS_BASE_URL,
-      });
+      }, catalogue);
 
       const payload: LibraryPayload = {
         books,
@@ -147,11 +182,32 @@ export default {
       );
     }
   },
+
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (!env.AIRTABLE_TOKEN) {
+      console.error("Librarium ingest skipped: AIRTABLE_TOKEN is not configured.");
+      return;
+    }
+
+    ctx.waitUntil(
+      ingestLibrary(env.LIBRARY_BUCKET, env.AIRTABLE_TOKEN, {
+        prefix: env.R2_PREFIX,
+        publicBaseUrl: env.R2_PUBLIC_BASE_URL,
+        baseId: env.AIRTABLE_BASE_ID,
+        booksTable: env.AIRTABLE_BOOKS_TABLE,
+        authorsTable: env.AIRTABLE_AUTHORS_TABLE,
+        classificationsTable: env.AIRTABLE_CLASSIFICATIONS_TABLE,
+      }).then((summary) => {
+        console.log(JSON.stringify({ message: "Librarium ingest completed", ...summary }));
+      }),
+    );
+  },
 } satisfies ExportedHandler<Env>;
 
 export async function listBooks(
   bucket: R2Bucket,
   config: LibraryConfig,
+  catalogue: Map<string, CatalogMetadata> = FALLBACK_CATALOGUE,
 ): Promise<LibraryBook[]> {
   const books: LibraryBook[] = [];
   let cursor: string | undefined;
@@ -170,7 +226,13 @@ export async function listBooks(
 
       const assetUrl = buildPublicUrl(config.publicBaseUrl, object.key);
       const slug = slugFromObjectKey(object.key);
-      const metadata = BOOKS_BY_SLUG.get(slug);
+      const metadata = catalogue.get(slug);
+
+      // R2 is the file store, but Airtable controls publication. Uncatalogued
+      // objects remain invisible until their reviewed record is Published.
+      if (!metadata && catalogue !== FALLBACK_CATALOGUE) {
+        continue;
+      }
       books.push({
         key: object.key,
         slug,
@@ -184,6 +246,10 @@ export async function listBooks(
           ? `${metadata.dateAdded}T00:00:00.000Z`
           : object.uploaded.toISOString(),
         size: object.size,
+        subjects: metadata?.subjects ?? [],
+        language: metadata?.language ?? "",
+        pages: metadata?.pages,
+        coverUrl: metadata?.coverUrl ?? "",
       });
     }
 
@@ -193,6 +259,65 @@ export async function listBooks(
   return books.sort((left, right) =>
     left.title.localeCompare(right.title, "en", { sensitivity: "base" }),
   );
+}
+
+const FALLBACK_CATALOGUE = fallbackCatalogue();
+
+async function loadCatalogue(env: Env): Promise<Map<string, CatalogMetadata>> {
+  if (!env.AIRTABLE_TOKEN) return FALLBACK_CATALOGUE;
+
+  try {
+    const airtable = new AirtableClient(env.AIRTABLE_TOKEN, env.AIRTABLE_BASE_ID);
+    const [books, authors, classifications] = await Promise.all([
+      airtable.list<BookRecordFields>(env.AIRTABLE_BOOKS_TABLE, {
+        fields: ["Title", "Authors", "Classification", "Subjects", "Language", "Pages", "Date Added", "Slug", "Cover URL", "Status"],
+        filterByFormula: "{Status}='Published'",
+      }),
+      airtable.list<AuthorRecordFields>(env.AIRTABLE_AUTHORS_TABLE, { fields: ["Name"] }),
+      airtable.list<ClassificationRecordFields>(env.AIRTABLE_CLASSIFICATIONS_TABLE, { fields: ["Class"] }),
+    ]);
+
+    const authorNames = new Map(authors.map((record) => [record.id, record.fields.Name ?? ""]));
+    const classNames = new Map(classifications.map((record) => [record.id, record.fields.Class ?? "Bibliotheca"]));
+    const catalogue = new Map<string, CatalogMetadata>();
+
+    for (const record of books) {
+      const slug = record.fields.Slug?.trim();
+      const title = record.fields.Title?.trim();
+      if (!slug || !title) continue;
+
+      const author = (record.fields.Authors ?? []).map((id) => authorNames.get(id)).filter(Boolean).join("; ");
+      const classification = (record.fields.Classification ?? []).map((id) => classNames.get(id)).find(Boolean) ?? "Bibliotheca";
+      catalogue.set(slug, {
+        slug,
+        title,
+        author,
+        classification,
+        dateAdded: record.fields["Date Added"] ?? record.createdTime.slice(0, 10),
+        subjects: record.fields.Subjects ?? [],
+        language: record.fields.Language ?? "",
+        pages: record.fields.Pages,
+        coverUrl: record.fields["Cover URL"] ?? "",
+      });
+    }
+
+    return catalogue;
+  } catch (error: unknown) {
+    console.error(JSON.stringify({
+      message: "Airtable catalogue unavailable; serving the checked-in fallback",
+      error: errorMessage(error),
+    }));
+    return FALLBACK_CATALOGUE;
+  }
+}
+
+function fallbackCatalogue(): Map<string, CatalogMetadata> {
+  return new Map(Array.from(BOOKS_BY_SLUG.entries(), ([slug, book]) => [slug, {
+    ...book,
+    subjects: [],
+    language: "",
+    coverUrl: "",
+  }] as const));
 }
 
 export function buildPublicUrl(baseUrl: string, key: string): string {

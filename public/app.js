@@ -95,7 +95,7 @@ function renderBooks() {
         return true;
       }
 
-      return normalizeSearchValue(`${book.title} ${book.author} ${book.collection} ${book.category}`).includes(query);
+      return normalizeSearchValue(`${book.title} ${book.author} ${book.collection} ${book.category} ${(book.subjects ?? []).join(" ")} ${book.language ?? ""}`).includes(query);
     })
     .sort((left, right) => {
       if (state.sort === "recent") {

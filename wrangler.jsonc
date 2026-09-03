@@ -17,7 +17,14 @@
   "vars": {
     "R2_PREFIX": "pdfs/",
     "R2_PUBLIC_BASE_URL": "https://assets.sacrumflorilegium.com/",
-    "PDFJS_BASE_URL": "https://reader.sacrumflorilegium.com/web/viewer.html"
+    "PDFJS_BASE_URL": "https://reader.sacrumflorilegium.com/web/viewer.html",
+    "AIRTABLE_BASE_ID": "appEBrDjSYL5WYWft",
+    "AIRTABLE_BOOKS_TABLE": "Books",
+    "AIRTABLE_AUTHORS_TABLE": "Authors",
+    "AIRTABLE_CLASSIFICATIONS_TABLE": "Classifications"
+  },
+  "triggers": {
+    "crons": ["*/10 * * * *"]
   },
   "observability": {
     "enabled": true,

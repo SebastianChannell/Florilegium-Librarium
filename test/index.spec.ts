@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { env, exports } from "cloudflare:workers";
+import { listBooks } from "../src/index";
 
 describe("Librarium Worker", () => {
   beforeAll(async () => {
@@ -92,5 +93,30 @@ describe("Librarium Worker", () => {
     });
     expect(post.status).toBe(405);
     expect(post.headers.get("allow")).toBe("GET, HEAD");
+  });
+
+  it("hides an R2 object when it has no published catalogue record", async () => {
+    const books = await listBooks(
+      env.LIBRARY_BUCKET,
+      {
+        prefix: "pdfs/",
+        publicBaseUrl: "https://assets.sacrumflorilegium.com/",
+        pdfjsBaseUrl: "https://reader.sacrumflorilegium.com/web/viewer.html",
+      },
+      new Map([
+        ["my-prayer-book", {
+          slug: "my-prayer-book",
+          title: "My Prayer-Book",
+          author: "Fr. F. X. Lasance",
+          classification: "Spiritualia",
+          dateAdded: "2026-07-11",
+          subjects: ["Prayer"],
+          language: "English",
+          coverUrl: "",
+        }],
+      ]),
+    );
+
+    expect(books.map((book) => book.slug)).toEqual(["my-prayer-book"]);
   });
 });

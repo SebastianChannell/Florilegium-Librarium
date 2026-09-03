@@ -8,8 +8,12 @@ The repository is currently named `Florilegium-Librariun`; the site and Worker u
 
 - Reads the live R2 object list directly through a Worker binding.
 - Includes every `.pdf` object below the configured `pdfs/` prefix.
-- Uses the canonical Airtable slug to match each R2 object with its title,
-  author, classification, and date-added metadata.
+- Uses Airtable as the live, canonical catalogue and publishes only records whose
+  `Status` is `Published`.
+- Scans `pdfs/` every ten minutes. New PDFs become reviewed-publication drafts
+  with file data, PDF metadata, page count, searchable-text detection, probable
+  language, a suggested title page, and linked author/classification when the
+  evidence is sufficiently clear.
 - Sends every book to the existing PDF.js reader rather than opening the raw PDF.
 - Provides a compact mobile list, instant search, and A–Z or recently-added sorting.
 - Caches the generated API response at the edge for five minutes, so new R2 books appear automatically without maintaining a second index.
@@ -42,8 +46,36 @@ pdfs/<slug>.pdf
 covers/<slug>.webp
 ```
 
-`src/catalog.ts` is the deployment snapshot of the Airtable catalogue. Airtable
-remains the canonical source; sync this file whenever catalogue records change.
+`src/catalog.ts` is only the read-only fallback used if Airtable is temporarily
+unavailable. Normal requests read the live Airtable catalogue at the edge and
+cache it for five minutes.
+
+## Reviewed publication
+
+1. Upload `pdfs/<slug>.pdf` to the `sacrum-assets` R2 bucket.
+2. Within ten minutes, the Worker creates a Books record with `Status = Draft`
+   and `Ingest Status = Review Needed`.
+3. Review the flagged fields in Airtable. Confirm the linked Author and
+   Classification, add Subjects, Source, edition information, Original Language,
+   OCR, and adjust Cover Page when necessary.
+4. Change `Status` to `Published`. Librarium will include the book after its
+   five-minute catalogue cache expires.
+
+Replacing a PDF at the same R2 key refreshes its file-derived fields without
+overwriting curated bibliographic metadata or a Published status. The R2 ETag is
+stored as `Content Hash` so unchanged PDFs are not processed twice.
+
+## Airtable access
+
+The Worker requires an Airtable personal access token with read/write access to
+records in the Librarium base. Store it as a Cloudflare Worker secret; never add
+it to this repository:
+
+```bash
+npx wrangler secret put AIRTABLE_TOKEN
+```
+
+The base ID and table names are non-secret values in `wrangler.jsonc`.
 
 ## Development
 
