@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check": "npm run types && npm run typecheck && npm test && wrangler deploy --dry-run",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "covers": "node scripts/generate-covers.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.21.3",
