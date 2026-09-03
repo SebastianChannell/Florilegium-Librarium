@@ -3,6 +3,7 @@ import { AirtableClient } from "./airtable";
 import { ingestLibrary } from "./ingest";
 
 const API_PATH = "/api/books";
+const COVER_MANIFEST_PATH = "/api/cover-manifest";
 const API_CACHE_SECONDS = 300;
 const API_CACHE_VERSION = "4";
 const PDF_EXTENSION = /\.pdf$/i;
@@ -84,6 +85,8 @@ interface BookRecordFields {
   "Date Added"?: string;
   Slug?: string;
   "Cover URL"?: string;
+  "Cover Page"?: number;
+  "R2 Key"?: string;
   Status?: string;
 }
 
@@ -97,6 +100,45 @@ export default {
     ctx: ExecutionContext,
   ): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === COVER_MANIFEST_PATH) {
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        return new Response(null, { status: 405, headers: { Allow: "GET, HEAD" } });
+      }
+      if (!env.AIRTABLE_TOKEN) {
+        return Response.json({ error: "Airtable is not configured." }, { status: 503 });
+      }
+
+      try {
+        const airtable = new AirtableClient(env.AIRTABLE_TOKEN, env.AIRTABLE_BASE_ID);
+        const records = await airtable.list<BookRecordFields>(env.AIRTABLE_BOOKS_TABLE, {
+          fields: ["Title", "Slug", "R2 Key", "Cover Page", "Cover URL"],
+        });
+        const covers = records.flatMap((record) => {
+          const slug = record.fields.Slug?.trim();
+          const pdfKey = record.fields["R2 Key"]?.trim();
+          const page = record.fields["Cover Page"];
+          const coverUrl = record.fields["Cover URL"]?.trim();
+          if (!slug || !pdfKey || !coverUrl || !page || page < 1) return [];
+          return [{
+            title: record.fields.Title?.trim() ?? slug,
+            slug,
+            pdfUrl: buildPublicUrl(env.R2_PUBLIC_BASE_URL, pdfKey),
+            coverUrl,
+            page: Math.floor(page),
+          }];
+        });
+        const response = Response.json({ covers, count: covers.length }, {
+          headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
+        });
+        return request.method === "HEAD"
+          ? new Response(null, { status: response.status, headers: response.headers })
+          : response;
+      } catch (error: unknown) {
+        console.error(JSON.stringify({ message: "Cover manifest failed", error: errorMessage(error) }));
+        return Response.json({ error: "Cover manifest is temporarily unavailable." }, { status: 503 });
+      }
+    }
 
     if (url.pathname !== API_PATH) {
       return new Response("Not found", {
