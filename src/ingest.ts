@@ -21,6 +21,7 @@ interface BookFields {
   "R2 Key"?: string;
   "Content Hash"?: string;
   Status?: string;
+  "Cover Page"?: number;
 }
 
 interface NamedFields {
@@ -45,7 +46,7 @@ export async function ingestLibrary(
   const airtable = new AirtableClient(token, config.baseId);
   const [books, authors, classifications, objects] = await Promise.all([
     airtable.list<BookFields>(config.booksTable, {
-      fields: ["Slug", "R2 Key", "Content Hash", "Status"],
+      fields: ["Slug", "R2 Key", "Content Hash", "Status", "Cover Page"],
     }),
     airtable.list<NamedFields>(config.authorsTable, { fields: ["Name"] }),
     airtable.list<NamedFields>(config.classificationsTable, {
@@ -124,6 +125,9 @@ export async function ingestLibrary(
         // A changed file refreshes only operational/file-derived fields. Curated
         // catalogue choices and Published status are never silently overwritten.
         const { Title: _title, Authors: _authors, Classification: _class, Status: _status, ...safeFields } = fields;
+        if (existing.fields["Cover Page"] !== undefined) {
+          delete safeFields["Cover Page"];
+        }
         if (existing.fields.Status === "Published") {
           safeFields["Ingest Status"] = "Ready";
           safeFields["Ingest Message"] = "File data refreshed. Published catalogue metadata was preserved.";
