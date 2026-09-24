@@ -371,6 +371,13 @@ export function buildPublicUrl(baseUrl: string, key: string): string {
   return new URL(encodedKey, normalizedBase).toString();
 }
 
+function buildVersionedPublicUrl(baseUrl: string, key: string, object: R2Object): string {
+  const url = new URL(buildPublicUrl(baseUrl, key));
+  const version = object.etag || `${object.size}-${object.uploaded.getTime()}`;
+  url.searchParams.set("v", version);
+  return url.toString();
+}
+
 export function buildPdfjsUrl(baseUrl: string, assetUrl: string): string {
   const viewerUrl = new URL(baseUrl);
   viewerUrl.searchParams.set("file", assetUrl);
