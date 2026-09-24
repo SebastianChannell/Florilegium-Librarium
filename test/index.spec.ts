@@ -58,10 +58,18 @@ describe("Librarium Worker", () => {
     expect(prayerBook).toMatchObject({
       category: "Spiritualia",
       collection: "Fr. F. X. Lasance",
-      assetUrl: "https://assets.sacrumflorilegium.com/pdfs/my-prayer-book.pdf",
-      readerUrl:
-        "https://reader.sacrumflorilegium.com/web/viewer.html?file=https%3A%2F%2Fassets.sacrumflorilegium.com%2Fpdfs%2Fmy-prayer-book.pdf",
     });
+    const assetUrl = new URL(prayerBook!.assetUrl);
+    expect(`${assetUrl.origin}${assetUrl.pathname}`).toBe(
+      "https://assets.sacrumflorilegium.com/pdfs/my-prayer-book.pdf",
+    );
+    expect(assetUrl.searchParams.get("v")).toBeTruthy();
+
+    const readerUrl = new URL(prayerBook!.readerUrl);
+    expect(`${readerUrl.origin}${readerUrl.pathname}`).toBe(
+      "https://reader.sacrumflorilegium.com/web/viewer.html",
+    );
+    expect(readerUrl.searchParams.get("file")).toBe(prayerBook!.assetUrl);
 
     const sophocles = payload.books.find(
       (book) => book.key === "pdfs/the-theban-plays.pdf",
