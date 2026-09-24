@@ -35,6 +35,12 @@ const archiveTargets = [
     file: "El infierno - Monseñor de Ségur.pdf",
   },
   {
+    key: "pdfs/el-sagrado-corazon-de-jesus.pdf",
+    minPages: 10,
+    identifier: "el-sagrado-corazo-n-de-jesu-s-por-monsenor-segur",
+    file: "EL SAGRADO CORAZÒN DE JESÙS por Monseñor Segur.pdf",
+  },
+  {
     key: "pdfs/las-maravillas-de-lourdes.pdf",
     minPages: 10,
     identifier: "las-maravillas-de-lourdes-mons.-louis-gaston-adrien-de-segur_202412",
