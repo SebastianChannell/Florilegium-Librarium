@@ -15,7 +15,8 @@ const repairTargets = [
   { key: "pdfs/respuestas-claras-y-sencillas-a-las-objeciones-contra-la-religon.pdf", minPages: 200 },
 ];
 
-// Revalidate known Archive.org recoveries whenever this workflow is retriggered.\nconst archiveTargets = [
+// Revalidate known Archive.org recoveries whenever this workflow is retriggered.
+const archiveTargets = [
   {
     key: "pdfs/al-soldado-en-tiempo-de-guerra.pdf",
     minPages: 10,
