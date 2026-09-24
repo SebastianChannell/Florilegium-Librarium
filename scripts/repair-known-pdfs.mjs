@@ -31,7 +31,7 @@ try {
 
     await exec("mutool", ["clean", "-gg", sourcePath, repairedPath], { maxBuffer: 20 * 1024 * 1024 });
     const pages = await pageCount(repairedPath);
-    await exec("qpdf", ["--check", repairedPath], { maxBuffer: 20 * 1024 * 1024 });
+    await qpdfCheck(repairedPath);
     if (pages < target.minPages) {
       throw new Error(`${target.key}: repaired output has only ${pages} pages; expected at least ${target.minPages}`);
     }
@@ -44,7 +44,7 @@ try {
     if (!verifyResponse.ok) throw new Error(`${target.key}: verification fetch returned ${verifyResponse.status}`);
     await writeFile(verifyPath, Buffer.from(await verifyResponse.arrayBuffer()));
     const verifiedPages = await pageCount(verifyPath);
-    await exec("qpdf", ["--check", verifyPath], { maxBuffer: 20 * 1024 * 1024 });
+    await qpdfCheck(verifyPath);
     if (verifiedPages !== pages) throw new Error(`${target.key}: uploaded copy has ${verifiedPages} pages, repaired copy has ${pages}`);
 
     const bytes = (await readFile(repairedPath)).length;
@@ -69,4 +69,15 @@ async function wranglerPut(key, file) {
     "wrangler", "r2", "object", "put", `${bucket}/${key}`,
     "--remote", `--file=${file}`, "--content-type=application/pdf",
   ], { maxBuffer: 20 * 1024 * 1024 });
+}
+
+
+async function qpdfCheck(file) {
+  try {
+    await exec("qpdf", ["--check", file], { maxBuffer: 20 * 1024 * 1024 });
+  } catch (error) {
+    // qpdf exit 3 means the PDF is usable but has warnings.
+    if (error?.code === 3) return;
+    throw error;
+  }
 }
