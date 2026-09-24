@@ -266,7 +266,7 @@ export async function listBooks(
         continue;
       }
 
-      const assetUrl = buildPublicUrl(config.publicBaseUrl, object.key);
+      const assetUrl = buildVersionedPublicUrl(config.publicBaseUrl, object.key, object);
       const slug = slugFromObjectKey(object.key);
       const metadata = catalogue.get(slug);
 
