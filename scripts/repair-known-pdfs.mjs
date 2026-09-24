@@ -29,9 +29,15 @@ const archiveTargets = [
     file: "La_Pasión_de_Nuestro_Señor_Jesucristo_Mons_Louis_Gastón_Adrien_de.pdf",
   },
   {
+    key: "pdfs/el-infierno.pdf",
+    minPages: 10,
+    identifier: "el-infierno-monsenor-de-segur",
+    file: "El infierno - Monseñor de Ségur.pdf",
+  },
+  {
     key: "pdfs/las-maravillas-de-lourdes.pdf",
     minPages: 10,
-    identifier: "las-maravillas-de-lourdes-mons.-louis-gaston-adrien-de-segur",
+    identifier: "las-maravillas-de-lourdes-mons.-louis-gaston-adrien-de-segur_202412",
     file: "Las maravillas de Lourdes - Mons. Louis Gastón Adrien de Segur.pdf",
   },
 ];
@@ -68,11 +74,7 @@ try {
     const archiveUrl = `https://archive.org/download/${encodeURIComponent(target.identifier)}/${encodeURIComponent(target.file)}`;
     console.log(`recover ${target.key} from ${target.identifier}`);
     const archivePath = join(work, `archive-${basename(target.key)}`);
-    const response = await fetch(archiveUrl, {
-      cache: "no-store",
-      headers: { "User-Agent": "Florilegium-Librarium/1.0" },
-    });
-    if (!response.ok) throw new Error(`${target.key}: Internet Archive returned ${response.status}`);
+    const response = await fetchWithRetry(archiveUrl, 4);
     await writeFile(archivePath, Buffer.from(await response.arrayBuffer()));
     const pages = await requireUsablePdf(archivePath, target.minPages, target.key);
 
@@ -156,4 +158,25 @@ async function wranglerPut(key, file) {
     "wrangler", "r2", "object", "put", `${bucket}/${key}`,
     "--remote", `--file=${file}`, "--content-type=application/pdf",
   ], { maxBuffer: 20 * 1024 * 1024 });
+}
+
+
+async function fetchWithRetry(url, attempts) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        cache: "no-store",
+        headers: { "User-Agent": "Florilegium-Librarium/1.0" },
+        signal: AbortSignal.timeout(45000),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response;
+    } catch (error) {
+      lastError = error;
+      console.warn(`download attempt ${attempt}/${attempts} failed: ${error?.message || error}`);
+      if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, attempt * 2000));
+    }
+  }
+  throw lastError;
 }
