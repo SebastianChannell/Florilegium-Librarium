@@ -13,7 +13,7 @@ export const BOOK_CATALOG: readonly CatalogBook[] = [
     slug: "ancora-de-salvacion",
     title: "Áncora de Salvación",
     author: "Fr. José Mach, S.J.",
-    classification: "Spiritualia",
+    classification: "Preces",
     dateAdded: "2026-08-22",
   },
   {
@@ -76,7 +76,7 @@ export const BOOK_CATALOG: readonly CatalogBook[] = [
     slug: "manual-of-the-purgatorian-society",
     title: "Manual of the Purgatorian Society",
     author: "Purgatorian Society",
-    classification: "Spiritualia",
+    classification: "Preces",
     dateAdded: "2026-07-11",
   },
   {
@@ -104,14 +104,14 @@ export const BOOK_CATALOG: readonly CatalogBook[] = [
     slug: "my-prayer-book",
     title: "My Prayer-Book",
     author: "Fr. F. X. Lasance",
-    classification: "Spiritualia",
+    classification: "Preces",
     dateAdded: "2026-07-11",
   },
   {
     slug: "prayer-book-for-religious",
     title: "Prayer-Book for Religious",
     author: "Fr. F. X. Lasance",
-    classification: "Spiritualia",
+    classification: "Preces",
     dateAdded: "2026-07-11",
   },
   {
@@ -160,14 +160,14 @@ export const BOOK_CATALOG: readonly CatalogBook[] = [
     slug: "with-god",
     title: "With God",
     author: "Fr. F. X. Lasance",
-    classification: "Spiritualia",
+    classification: "Preces",
     dateAdded: "2026-07-10",
   },
   {
     slug: "young-mans-guide",
     title: "The Young Man's Guide",
     author: "Fr. F. X. Lasance",
-    classification: "Spiritualia",
+    classification: "Preces",
     dateAdded: "2026-07-11",
   },
 ];
