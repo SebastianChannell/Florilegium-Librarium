@@ -623,3 +623,14 @@ main {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* A single quiet reading shortcut beneath Librarium's introduction. */
+.daily-saints-link {
+  margin: 0.7rem 0 0;
+  font-size: 0.73rem;
+  font-weight: 600;
+  letter-spacing: 0.025em;
+}
+.daily-saints-link a { color: var(--accent); text-decoration: none; }
+.daily-saints-link a:hover { text-decoration: underline; text-underline-offset: 0.2em; }
+.daily-saints-link a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
