@@ -671,7 +671,7 @@ main {
 }
 
 .category-name::before,
-.category-meta span:last-child {
+.category-meta span[aria-hidden="true"] {
   display: none;
 }
 
