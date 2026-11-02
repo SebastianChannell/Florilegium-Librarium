@@ -6,6 +6,17 @@ const statusMessage = requiredElement("status-message");
 const libraryList = requiredElement("library-list");
 const categoryList = requiredElement("category-list");
 const showAllCategories = requiredElement("show-all-categories");
+const gridViewButton = requiredElement("grid-view");
+const listViewButton = requiredElement("list-view");
+const catalogueSection = requiredElement("catalogue-view");
+const detailSection = requiredElement("book-detail");
+const backToBooks = requiredElement("back-to-books");
+const detailCover = requiredElement("detail-cover");
+const detailCategory = requiredElement("detail-category");
+const detailTitle = requiredElement("detail-title");
+const detailAuthor = requiredElement("detail-author");
+const detailMetadata = requiredElement("detail-metadata");
+const detailReader = requiredElement("detail-reader");
 const categoryOptions = [...categoryList.querySelectorAll("[data-category]")];
 
 const titleCollator = new Intl.Collator("en", {
@@ -18,6 +29,7 @@ const state = {
   query: new URLSearchParams(window.location.search).get("q")?.trim() ?? "",
   category: new URLSearchParams(window.location.search).get("category")?.trim() ?? "",
   sort: "title",
+  view: "grid",
 };
 
 searchInput.value = state.query;
@@ -55,6 +67,25 @@ sortSelect.addEventListener("change", () => {
   renderBooks();
 });
 
+gridViewButton.addEventListener("click", () => setView("grid"));
+listViewButton.addEventListener("click", () => setView("list"));
+
+backToBooks.addEventListener("click", () => {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("book");
+  window.history.pushState(null, "", url);
+  renderCurrentView();
+});
+
+window.addEventListener("popstate", () => {
+  const params = new URLSearchParams(window.location.search);
+  state.query = params.get("q")?.trim() ?? "";
+  state.category = params.get("category")?.trim() ?? "";
+  searchInput.value = state.query;
+  renderBooks();
+  renderCurrentView();
+});
+
 await loadBooks();
 
 async function loadBooks() {
@@ -77,6 +108,7 @@ async function loadBooks() {
     state.books = payload.books.filter(isBook);
     renderCategoryCounts();
     renderBooks();
+    renderCurrentView();
   } catch (error) {
     console.error("Could not load Librarium", error);
     renderError();
@@ -114,6 +146,7 @@ function renderBooks() {
   }
 
   libraryList.append(fragment);
+  libraryList.dataset.view = state.view;
   resultCount.textContent = resultCountText(
     visibleBooks.length,
     state.books.length,
@@ -139,7 +172,7 @@ function renderCategoryCounts() {
   for (const option of categoryOptions) {
     const count = option.querySelector(".category-count");
     if (count) {
-      count.textContent = String(counts.get(option.dataset.category) ?? 0);
+      count.textContent = String(option.dataset.category ? (counts.get(option.dataset.category) ?? 0) : state.books.length);
     }
   }
 }
@@ -155,14 +188,69 @@ function renderCategorySelection() {
   showAllCategories.hidden = !state.category;
 }
 
+function setView(view) {
+  state.view = view === "list" ? "list" : "grid";
+  libraryList.dataset.view = state.view;
+  gridViewButton.setAttribute("aria-pressed", String(state.view === "grid"));
+  listViewButton.setAttribute("aria-pressed", String(state.view === "list"));
+}
+
+function bookPageUrl(slug) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("book", slug);
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+function createBookThumbnail(book, isDetail = false) {
+  const frame = document.createElement("span");
+  frame.className = "book-thumbnail";
+
+  const placeholder = document.createElement("span");
+  placeholder.className = "thumbnail-placeholder";
+  placeholder.setAttribute("aria-hidden", "true");
+
+  const mark = document.createElement("span");
+  mark.className = "placeholder-mark";
+  mark.textContent = "✠";
+
+  const label = document.createElement("span");
+  label.className = "placeholder-title";
+  label.textContent = book.title;
+  placeholder.append(mark, label);
+
+  if (typeof book.coverUrl === "string" && book.coverUrl.trim()) {
+    const image = document.createElement("img");
+    image.src = book.coverUrl;
+    image.alt = isDetail ? `Title page of ${book.title}` : "";
+    image.loading = isDetail ? "eager" : "lazy";
+    image.decoding = "async";
+    placeholder.hidden = true;
+    image.addEventListener("error", () => {
+      image.remove();
+      placeholder.hidden = false;
+    });
+    frame.append(image);
+  }
+
+  frame.append(placeholder);
+  return frame;
+}
+
 function createBookRow(book) {
   const item = document.createElement("li");
   item.className = "book-item";
 
   const link = document.createElement("a");
   link.className = "book-link";
-  link.href = book.readerUrl;
-  link.setAttribute("aria-label", `Read ${book.title}`);
+  link.href = bookPageUrl(book.slug);
+  link.setAttribute("aria-label", `View ${book.title}, by ${book.author || "unknown author"}`);
+  link.addEventListener("click", (event) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return;
+    }
+    event.preventDefault();
+    openBookDetail(book);
+  });
 
   const details = document.createElement("span");
   details.className = "book-details";
@@ -172,27 +260,67 @@ function createBookRow(book) {
   title.textContent = book.title;
   details.append(title);
 
-  if (book.collection && book.collection !== "Library") {
-    const collection = document.createElement("span");
-    collection.className = "book-collection";
-    collection.textContent = book.collection;
-    details.append(collection);
+  if (book.author) {
+    const author = document.createElement("span");
+    author.className = "book-author";
+    author.textContent = book.author;
+    details.append(author);
   }
 
-  const action = document.createElement("span");
-  action.className = "book-action";
+  const classification = document.createElement("span");
+  classification.className = "book-collection";
+  classification.textContent = book.category;
+  details.append(classification);
 
-  const actionLabel = document.createElement("span");
-  actionLabel.textContent = "Read";
-
-  const actionArrow = document.createElement("span");
-  actionArrow.setAttribute("aria-hidden", "true");
-  actionArrow.textContent = "→";
-
-  action.append(actionLabel, actionArrow);
-  link.append(details, action);
+  link.append(createBookThumbnail(book), details);
   item.append(link);
   return item;
+}
+
+function openBookDetail(book) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("book", book.slug);
+  window.history.pushState(null, "", url);
+  renderCurrentView();
+  window.scrollTo({ top: 0, behavior: "instant" });
+  backToBooks.focus({ preventScroll: true });
+}
+
+function appendDetailField(label, value) {
+  if (!value) return;
+  const row = document.createElement("div");
+  row.className = "detail-metadata-row";
+  const term = document.createElement("dt");
+  term.textContent = label;
+  const description = document.createElement("dd");
+  description.textContent = String(value);
+  row.append(term, description);
+  detailMetadata.append(row);
+}
+
+function renderCurrentView() {
+  const slug = new URLSearchParams(window.location.search).get("book");
+  const book = slug && state.books.find((entry) => entry.slug === slug);
+  if (!book) {
+    detailSection.hidden = true;
+    catalogueSection.hidden = false;
+    return;
+  }
+
+  detailCategory.textContent = book.category;
+  detailTitle.textContent = book.title;
+  detailAuthor.textContent = book.author || "Author not listed";
+  detailCover.replaceChildren(createBookThumbnail(book, true));
+  detailMetadata.replaceChildren();
+  appendDetailField("Classification", book.category);
+  appendDetailField("Language", book.language);
+  appendDetailField("Pages", book.pages);
+  appendDetailField("Subjects", Array.isArray(book.subjects) ? book.subjects.join(", ") : "");
+  appendDetailField("Format", "Digital facsimile · PDF");
+  detailReader.href = book.readerUrl;
+
+  catalogueSection.hidden = true;
+  detailSection.hidden = false;
 }
 
 function renderEmptyState(isSearch) {
