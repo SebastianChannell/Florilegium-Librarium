@@ -46,7 +46,7 @@
       </header>
 
       <main>
-        <section aria-labelledby="library-heading">
+        <section id="catalogue-view" aria-labelledby="library-heading">
           <h1 id="library-heading" class="visually-hidden">Library books</h1>
 
           <form id="search-form" class="search" role="search">
@@ -62,7 +62,7 @@
               inputmode="search"
               autocomplete="off"
               spellcheck="false"
-              placeholder="Search title, author, or collection"
+              placeholder="Search books, authors, subjects…"
             >
           </form>
 
@@ -74,6 +74,10 @@
               </button>
             </div>
             <div id="category-list" class="category-list">
+              <button class="category-option" type="button" data-category="" aria-pressed="true">
+                <span class="category-name">Omnes</span>
+                <span class="category-meta"><span class="category-count">0</span></span>
+              </button>
               <button class="category-option" type="button" data-category="Liturgia" aria-pressed="false">
                 <span class="category-name">Liturgia</span>
                 <span class="category-meta"><span class="category-count">0</span><span aria-hidden="true">›</span></span>
@@ -99,13 +103,28 @@
 
           <div class="browse-tools">
             <p id="result-count" class="result-count" aria-live="polite">Loading books…</p>
-            <label class="sort-control">
-              <span class="visually-hidden">Sort books</span>
-              <select id="sort-select" aria-label="Sort books">
-                <option value="title">Title A–Z</option>
-                <option value="recent">Recently added</option>
-              </select>
-            </label>
+            <div class="browse-actions">
+              <label class="sort-control">
+                <span class="visually-hidden">Sort books</span>
+                <select id="sort-select" aria-label="Sort books">
+                  <option value="title">Title A–Z</option>
+                  <option value="recent">Recently added</option>
+                </select>
+              </label>
+              <div class="view-toggle" role="group" aria-label="Display books as">
+                <button id="grid-view" class="view-button" type="button" aria-label="Grid" aria-pressed="true" title="Grid view">
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                    <rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect>
+                    <rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect>
+                  </svg>
+                </button>
+                <button id="list-view" class="view-button" type="button" aria-label="List" aria-pressed="false" title="List view">
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+                    <path d="M8 6h13M8 12h13M8 18h13M3 6h1M3 12h1M3 18h1"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
           </div>
 
           <div id="status-message" class="status-message" role="status" aria-live="polite">
@@ -113,7 +132,21 @@
             <span>Opening the library…</span>
           </div>
 
-          <ol id="library-list" class="library-list" aria-label="Books" hidden></ol>
+          <ol id="library-list" class="library-list" aria-label="Books" data-view="grid" hidden></ol>
+        </section>
+
+        <section id="book-detail" class="book-detail" aria-labelledby="detail-title" hidden>
+          <button id="back-to-books" class="back-to-books" type="button">← Return to catalogue</button>
+          <div class="detail-layout">
+            <div id="detail-cover" class="detail-cover"></div>
+            <div class="detail-description">
+              <p id="detail-category" class="detail-category"></p>
+              <h1 id="detail-title" class="detail-title"></h1>
+              <p id="detail-author" class="detail-author"></p>
+              <dl id="detail-metadata" class="detail-metadata"></dl>
+              <a id="detail-reader" class="detail-reader">Open in Librarium Reader <span aria-hidden="true">→</span></a>
+            </div>
+          </div>
         </section>
       </main>
 
