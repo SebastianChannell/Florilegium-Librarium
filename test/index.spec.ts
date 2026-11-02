@@ -56,7 +56,7 @@ describe("Librarium Worker", () => {
 
     const prayerBook = payload.books.find((book) => book.key === "pdfs/my-prayer-book.pdf");
     expect(prayerBook).toMatchObject({
-      category: "Spiritualia",
+      category: "Preces",
       collection: "Fr. F. X. Lasance",
     });
     const assetUrl = new URL(prayerBook!.assetUrl);
