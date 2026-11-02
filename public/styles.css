@@ -680,10 +680,11 @@ main {
   font-size: 0.68rem;
 }
 
-.category-meta .category-count {
+.category-meta span.category-count {
   display: inline;
   color: var(--faint);
   font-size: 0.68rem;
+  line-height: 1.2;
 }
 
 .browse-tools {
