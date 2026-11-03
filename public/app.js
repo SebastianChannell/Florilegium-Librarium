@@ -1,382 +1,50 @@
-const searchForm = requiredElement("search-form");
-const searchInput = requiredElement("search-input");
-const sortSelect = requiredElement("sort-select");
-const resultCount = requiredElement("result-count");
-const statusMessage = requiredElement("status-message");
-const libraryList = requiredElement("library-list");
-const categoryList = requiredElement("category-list");
-const showAllCategories = requiredElement("show-all-categories");
-const gridViewButton = requiredElement("grid-view");
-const listViewButton = requiredElement("list-view");
-const catalogueSection = requiredElement("catalogue-view");
-const detailSection = requiredElement("book-detail");
-const backToBooks = requiredElement("back-to-books");
-const detailCover = requiredElement("detail-cover");
-const detailCategory = requiredElement("detail-category");
-const detailTitle = requiredElement("detail-title");
-const detailAuthor = requiredElement("detail-author");
-const detailMetadata = requiredElement("detail-metadata");
-const detailReader = requiredElement("detail-reader");
-const categoryOptions = [...categoryList.querySelectorAll("[data-category]")];
-
-const titleCollator = new Intl.Collator("en", {
-  numeric: true,
-  sensitivity: "base",
-});
-
-const state = {
-  books: [],
-  query: new URLSearchParams(window.location.search).get("q")?.trim() ?? "",
-  category: new URLSearchParams(window.location.search).get("category")?.trim() ?? "",
-  sort: "title",
-  view: "grid",
+const elements = {
+  sidebar: document.getElementById("browse-sidebar"),
+  toggle: document.getElementById("sidebar-toggle"),
+  close: document.getElementById("sidebar-close"),
+  backdrop: document.getElementById("sidebar-backdrop"),
+  searchForm: document.getElementById("search-form"),
+  searchInput: document.getElementById("search-input"),
+  clearSearch: document.getElementById("clear-search"),
+  count: document.getElementById("result-count"),
+  status: document.getElementById("status-message"),
+  results: document.getElementById("results"),
 };
 
-searchInput.value = state.query;
+const mainCategories = ["Liturgia", "Theologia", "Spiritualia", "Preces", "Auctores"];
+const titleCollator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+const state = {
+  books: [],
+  query: new URLSearchParams(location.search).get("q") || "",
+};
+const expandedGroups = new Set();
+let focusBeforeSidebar = null;
 
-searchForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  searchInput.blur();
-});
-
-searchInput.addEventListener("input", () => {
-  state.query = searchInput.value.trim();
-  updateAddressBar();
-  renderBooks();
-});
-
-categoryList.addEventListener("click", (event) => {
-  const option = event.target.closest("[data-category]");
-  if (!option) {
-    return;
+function openSidebar(focusSearch = false) {
+  if (!document.body.classList.contains("sidebar-open")) {
+    focusBeforeSidebar = document.activeElement;
+    document.body.classList.add("sidebar-open");
+    elements.sidebar.inert = false;
+    elements.sidebar.setAttribute("aria-hidden", "false");
+    elements.toggle.setAttribute("aria-expanded", "true");
   }
-
-  state.category = option.dataset.category ?? "";
-  updateAddressBar();
-  renderBooks();
-});
-
-showAllCategories.addEventListener("click", () => {
-  state.category = "";
-  updateAddressBar();
-  renderBooks();
-});
-
-sortSelect.addEventListener("change", () => {
-  state.sort = sortSelect.value === "recent" ? "recent" : "title";
-  renderBooks();
-});
-
-gridViewButton.addEventListener("click", () => setView("grid"));
-listViewButton.addEventListener("click", () => setView("list"));
-
-backToBooks.addEventListener("click", () => {
-  const url = new URL(window.location.href);
-  url.searchParams.delete("book");
-  window.history.pushState(null, "", url);
-  renderCurrentView();
-});
-
-window.addEventListener("popstate", () => {
-  const params = new URLSearchParams(window.location.search);
-  state.query = params.get("q")?.trim() ?? "";
-  state.category = params.get("category")?.trim() ?? "";
-  searchInput.value = state.query;
-  renderBooks();
-  renderCurrentView();
-});
-
-await loadBooks();
-
-async function loadBooks() {
-  setLoadingState();
-
-  try {
-    const response = await fetch("/api/books", {
-      headers: { Accept: "application/json" },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Library request failed with ${response.status}`);
-    }
-
-    const payload = await response.json();
-    if (!payload || !Array.isArray(payload.books)) {
-      throw new Error("Library response was not valid");
-    }
-
-    state.books = payload.books.filter(isBook);
-    renderCategoryCounts();
-    renderBooks();
-    renderCurrentView();
-  } catch (error) {
-    console.error("Could not load Librarium", error);
-    renderError();
-  }
+  (focusSearch ? elements.searchInput : elements.close).focus({ preventScroll: true });
 }
 
-function renderBooks() {
-  const query = normalizeSearchValue(state.query);
-  const visibleBooks = state.books
-    .filter((book) => {
-      if (state.category && book.category !== state.category) {
-        return false;
-      }
-
-      if (!query) {
-        return true;
-      }
-
-      return normalizeSearchValue(`${book.title} ${book.author} ${book.collection} ${book.category} ${(book.subjects ?? []).join(" ")} ${book.language ?? ""}`).includes(query);
-    })
-    .sort((left, right) => {
-      if (state.sort === "recent") {
-        const dateDifference = Date.parse(right.uploaded) - Date.parse(left.uploaded);
-        return dateDifference || titleCollator.compare(left.title, right.title);
-      }
-
-      return titleCollator.compare(left.title, right.title);
-    });
-
-  libraryList.replaceChildren();
-  const fragment = document.createDocumentFragment();
-
-  for (const book of visibleBooks) {
-    fragment.append(createBookRow(book));
-  }
-
-  libraryList.append(fragment);
-  libraryList.dataset.view = state.view;
-  resultCount.textContent = resultCountText(
-    visibleBooks.length,
-    state.books.length,
-    Boolean(query || state.category),
-  );
-  renderCategorySelection();
-
-  if (visibleBooks.length === 0) {
-    renderEmptyState(Boolean(query));
-    return;
-  }
-
-  statusMessage.hidden = true;
-  libraryList.hidden = false;
+function closeSidebar() {
+  if (!document.body.classList.contains("sidebar-open")) return;
+  document.body.classList.remove("sidebar-open");
+  elements.sidebar.inert = true;
+  elements.sidebar.setAttribute("aria-hidden", "true");
+  elements.toggle.setAttribute("aria-expanded", "false");
+  const target = focusBeforeSidebar && focusBeforeSidebar.isConnected
+    ? focusBeforeSidebar : elements.toggle;
+  target.focus({ preventScroll: true });
+  focusBeforeSidebar = null;
 }
 
-function renderCategoryCounts() {
-  const counts = new Map();
-  for (const book of state.books) {
-    counts.set(book.category, (counts.get(book.category) ?? 0) + 1);
-  }
-
-  for (const option of categoryOptions) {
-    const count = option.querySelector(".category-count");
-    if (count) {
-      count.textContent = String(option.dataset.category ? (counts.get(option.dataset.category) ?? 0) : state.books.length);
-    }
-  }
-}
-
-function renderCategorySelection() {
-  for (const option of categoryOptions) {
-    option.setAttribute(
-      "aria-pressed",
-      String(option.dataset.category === state.category),
-    );
-  }
-
-  showAllCategories.hidden = !state.category;
-}
-
-function setView(view) {
-  state.view = view === "list" ? "list" : "grid";
-  libraryList.dataset.view = state.view;
-  gridViewButton.setAttribute("aria-pressed", String(state.view === "grid"));
-  listViewButton.setAttribute("aria-pressed", String(state.view === "list"));
-}
-
-function bookPageUrl(slug) {
-  const url = new URL(window.location.href);
-  url.searchParams.set("book", slug);
-  return `${url.pathname}${url.search}${url.hash}`;
-}
-
-function createBookThumbnail(book, isDetail = false) {
-  const frame = document.createElement("span");
-  frame.className = "book-thumbnail";
-
-  const placeholder = document.createElement("span");
-  placeholder.className = "thumbnail-placeholder";
-  placeholder.setAttribute("aria-hidden", "true");
-
-  const mark = document.createElement("span");
-  mark.className = "placeholder-mark";
-  mark.textContent = "✠";
-
-  const label = document.createElement("span");
-  label.className = "placeholder-title";
-  label.textContent = book.title;
-  placeholder.append(mark, label);
-
-  if (typeof book.coverUrl === "string" && book.coverUrl.trim()) {
-    const image = document.createElement("img");
-    image.src = book.coverUrl;
-    image.alt = isDetail ? `Title page of ${book.title}` : "";
-    image.loading = isDetail ? "eager" : "lazy";
-    image.decoding = "async";
-    placeholder.hidden = true;
-    image.addEventListener("error", () => {
-      image.remove();
-      placeholder.hidden = false;
-    });
-    frame.append(image);
-  }
-
-  frame.append(placeholder);
-  return frame;
-}
-
-function createBookRow(book) {
-  const item = document.createElement("li");
-  item.className = "book-item";
-
-  const link = document.createElement("a");
-  link.className = "book-link";
-  link.href = bookPageUrl(book.slug);
-  link.setAttribute("aria-label", `View ${book.title}, by ${book.author || "unknown author"}`);
-  link.addEventListener("click", (event) => {
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-      return;
-    }
-    event.preventDefault();
-    openBookDetail(book);
-  });
-
-  const details = document.createElement("span");
-  details.className = "book-details";
-
-  const title = document.createElement("span");
-  title.className = "book-title";
-  title.textContent = book.title;
-  details.append(title);
-
-  if (book.author) {
-    const author = document.createElement("span");
-    author.className = "book-author";
-    author.textContent = book.author;
-    details.append(author);
-  }
-
-  const classification = document.createElement("span");
-  classification.className = "book-collection";
-  classification.textContent = book.category;
-  details.append(classification);
-
-  link.append(createBookThumbnail(book), details);
-  item.append(link);
-  return item;
-}
-
-function openBookDetail(book) {
-  const url = new URL(window.location.href);
-  url.searchParams.set("book", book.slug);
-  window.history.pushState(null, "", url);
-  renderCurrentView();
-  window.scrollTo({ top: 0, behavior: "instant" });
-  backToBooks.focus({ preventScroll: true });
-}
-
-function appendDetailField(label, value) {
-  if (!value) return;
-  const row = document.createElement("div");
-  row.className = "detail-metadata-row";
-  const term = document.createElement("dt");
-  term.textContent = label;
-  const description = document.createElement("dd");
-  description.textContent = String(value);
-  row.append(term, description);
-  detailMetadata.append(row);
-}
-
-function renderCurrentView() {
-  const slug = new URLSearchParams(window.location.search).get("book");
-  const book = slug && state.books.find((entry) => entry.slug === slug);
-  if (!book) {
-    detailSection.hidden = true;
-    catalogueSection.hidden = false;
-    return;
-  }
-
-  detailCategory.textContent = book.category;
-  detailTitle.textContent = book.title;
-  detailAuthor.textContent = book.author || "Author not listed";
-  detailCover.replaceChildren(createBookThumbnail(book, true));
-  detailMetadata.replaceChildren();
-  appendDetailField("Classification", book.category);
-  appendDetailField("Language", book.language);
-  appendDetailField("Pages", book.pages);
-  appendDetailField("Subjects", Array.isArray(book.subjects) ? book.subjects.join(", ") : "");
-  appendDetailField("Format", "Digital facsimile · PDF");
-  detailReader.href = book.readerUrl;
-
-  catalogueSection.hidden = true;
-  detailSection.hidden = false;
-}
-
-function renderEmptyState(isSearch) {
-  libraryList.hidden = true;
-  statusMessage.replaceChildren();
-
-  const message = document.createElement("p");
-  message.textContent = isSearch
-    ? "No books match this search."
-    : "No PDF books were found in the library.";
-  statusMessage.append(message);
-  statusMessage.hidden = false;
-}
-
-function renderError() {
-  libraryList.hidden = true;
-  resultCount.textContent = "Library unavailable";
-  statusMessage.replaceChildren();
-
-  const message = document.createElement("p");
-  message.textContent = "The library could not be opened just now.";
-
-  const retry = document.createElement("button");
-  retry.className = "retry-button";
-  retry.type = "button";
-  retry.textContent = "Try again";
-  retry.addEventListener("click", () => {
-    void loadBooks();
-  });
-
-  statusMessage.append(message, retry);
-  statusMessage.hidden = false;
-}
-
-function setLoadingState() {
-  libraryList.hidden = true;
-  resultCount.textContent = "Loading books…";
-  statusMessage.replaceChildren();
-
-  const mark = document.createElement("span");
-  mark.className = "loading-mark";
-  mark.setAttribute("aria-hidden", "true");
-
-  const message = document.createElement("span");
-  message.textContent = "Opening the library…";
-  statusMessage.append(mark, message);
-  statusMessage.hidden = false;
-}
-
-function resultCountText(visible, total, isSearch) {
-  const noun = visible === 1 ? "book" : "books";
-  return isSearch ? `${visible} of ${total} ${noun}` : `${visible} ${noun}`;
-}
-
-function normalizeSearchValue(value) {
-  return value
+function normalize(value) {
+  return String(value || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLocaleLowerCase("en-US")
@@ -384,39 +52,204 @@ function normalizeSearchValue(value) {
     .trim();
 }
 
-function updateAddressBar() {
-  const url = new URL(window.location.href);
-  if (state.query) {
-    url.searchParams.set("q", state.query);
-  } else {
-    url.searchParams.delete("q");
-  }
-  if (state.category) {
-    url.searchParams.set("category", state.category);
-  } else {
-    url.searchParams.delete("category");
-  }
-  window.history.replaceState(null, "", url);
+function sortedBooks(books) {
+  return [...books].sort((a, b) => titleCollator.compare(a.title, b.title));
 }
 
-function isBook(value) {
-  return (
-    value &&
-    typeof value.key === "string" &&
-    typeof value.slug === "string" &&
-    typeof value.title === "string" &&
-    typeof value.author === "string" &&
-    typeof value.category === "string" &&
-    typeof value.collection === "string" &&
-    typeof value.readerUrl === "string" &&
-    typeof value.uploaded === "string"
-  );
+function searchText(book) {
+  return [
+    book.title, book.author, book.category, book.collection,
+    book.language, ...(Array.isArray(book.subjects) ? book.subjects : []),
+  ].join(" ");
 }
 
-function requiredElement(id) {
-  const element = document.getElementById(id);
-  if (!element) {
-    throw new Error(`Missing required element: ${id}`);
+function bookList(books) {
+  const list = document.createElement("ul");
+  list.className = "book-list";
+
+  for (const book of books) {
+    const item = document.createElement("li");
+    const link = document.createElement("a");
+    link.className = "book-link";
+    link.href = book.readerUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = book.title;
+    link.setAttribute("aria-label", "Open " + book.title + " in a new tab");
+    if (book.author) link.title = book.author;
+    item.append(link);
+    list.append(item);
   }
-  return element;
+  return list;
 }
+
+function categoryGroup(name, books) {
+  const group = document.createElement("details");
+  group.className = "category-group";
+  group.open = expandedGroups.has(name);
+  group.addEventListener("toggle", () => {
+    if (group.open) expandedGroups.add(name);
+    else expandedGroups.delete(name);
+  });
+
+  const heading = document.createElement("summary");
+  const label = document.createElement("span");
+  label.className = "category-name";
+  label.textContent = name;
+  const count = document.createElement("span");
+  count.className = "category-count";
+  count.textContent = String(books.length);
+  const chevron = document.createElement("span");
+  chevron.className = "category-chevron";
+  chevron.textContent = "›";
+  chevron.setAttribute("aria-hidden", "true");
+  heading.append(label, count, chevron);
+  group.append(heading, bookList(books));
+  return group;
+}
+
+function renderIndex() {
+  const query = normalize(state.query);
+  elements.clearSearch.hidden = !state.query;
+  elements.results.replaceChildren();
+  elements.status.hidden = true;
+
+  if (query) {
+    const matches = sortedBooks(state.books.filter((book) => normalize(searchText(book)).includes(query)));
+    elements.count.textContent = matches.length + (matches.length === 1 ? " book found" : " books found");
+    if (!matches.length) {
+      const empty = document.createElement("p");
+      empty.className = "empty-message";
+      empty.textContent = "No matching books.";
+      elements.results.append(empty);
+      return;
+    }
+
+    const label = document.createElement("p");
+    label.className = "search-results-label";
+    label.textContent = "Results";
+    const list = bookList(matches);
+    list.classList.add("search-results");
+    elements.results.append(label, list);
+    return;
+  }
+
+  elements.count.textContent = state.books.length + (state.books.length === 1 ? " book" : " books");
+  const grouped = new Map();
+  for (const book of state.books) {
+    const category = book.category.trim() || "Alia";
+    if (!grouped.has(category)) grouped.set(category, []);
+    grouped.get(category).push(book);
+  }
+
+  const categories = [
+    ...mainCategories,
+    ...[...grouped.keys()].filter((name) => !mainCategories.includes(name)).sort(titleCollator.compare),
+  ];
+  const fragment = document.createDocumentFragment();
+  fragment.append(categoryGroup("Omnes", sortedBooks(state.books)));
+  for (const category of categories) {
+    fragment.append(categoryGroup(category, sortedBooks(grouped.get(category) || [])));
+  }
+  elements.results.append(fragment);
+}
+
+function updateSearch() {
+  state.query = elements.searchInput.value.trim();
+  const url = new URL(location.href);
+  if (state.query) url.searchParams.set("q", state.query);
+  else url.searchParams.delete("q");
+  history.replaceState(null, "", url);
+  renderIndex();
+}
+
+function validBook(book) {
+  if (!book || typeof book.title !== "string" ||
+      typeof book.category !== "string" || typeof book.readerUrl !== "string") return false;
+  try {
+    const url = new URL(book.readerUrl);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+async function loadBooks() {
+  elements.count.textContent = "Loading books…";
+  elements.results.replaceChildren();
+  elements.status.hidden = true;
+  try {
+    const response = await fetch("/api/books", { headers: { Accept: "application/json" } });
+    if (!response.ok) throw new Error("Catalogue request failed: " + response.status);
+    const data = await response.json();
+    if (!data || !Array.isArray(data.books)) throw new Error("Invalid catalogue response");
+    state.books = data.books.filter(validBook);
+    renderIndex();
+  } catch (error) {
+    console.error("Could not load Librarium", error);
+    elements.count.textContent = "Catalogue unavailable";
+    elements.status.replaceChildren();
+    const message = document.createElement("p");
+    message.textContent = "Books could not be loaded.";
+    const retry = document.createElement("button");
+    retry.className = "retry-button";
+    retry.type = "button";
+    retry.textContent = "Try again";
+    retry.addEventListener("click", loadBooks);
+    elements.status.append(message, retry);
+    elements.status.hidden = false;
+  }
+}
+
+elements.searchInput.value = state.query;
+elements.searchForm.addEventListener("submit", (event) => event.preventDefault());
+elements.searchInput.addEventListener("input", updateSearch);
+elements.clearSearch.addEventListener("click", () => {
+  elements.searchInput.value = "";
+  updateSearch();
+  elements.searchInput.focus();
+});
+elements.toggle.addEventListener("click", () => openSidebar(true));
+elements.close.addEventListener("click", closeSidebar);
+elements.backdrop.addEventListener("click", closeSidebar);
+
+window.addEventListener("popstate", () => {
+  state.query = new URLSearchParams(location.search).get("q") || "";
+  elements.searchInput.value = state.query;
+  renderIndex();
+});
+
+document.addEventListener("keydown", (event) => {
+  const isOpen = document.body.classList.contains("sidebar-open");
+  if (event.key === "Escape" && isOpen) {
+    event.preventDefault();
+    closeSidebar();
+    return;
+  }
+  if (event.key === "Tab" && isOpen) {
+    const focusable = [...elements.sidebar.querySelectorAll(
+      'button:not([disabled]), a[href], input:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'
+    )].filter((element) => element.getClientRects().length);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && (document.activeElement === first || !elements.sidebar.contains(document.activeElement))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (document.activeElement === last || !elements.sidebar.contains(document.activeElement))) {
+      event.preventDefault();
+      first.focus();
+    }
+    return;
+  }
+
+  const editable = document.activeElement && document.activeElement.matches('input, textarea, [contenteditable="true"]');
+  if (event.key === "/" && !event.altKey && !event.ctrlKey && !event.metaKey && !editable) {
+    event.preventDefault();
+    openSidebar(true);
+  }
+});
+
+// The sidebar is the entire interface: open it immediately to avoid a blank landing screen.
+openSidebar();
+void loadBooks();
