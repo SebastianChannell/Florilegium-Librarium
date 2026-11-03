@@ -5,7 +5,7 @@ import { ingestLibrary } from "./ingest";
 const API_PATH = "/api/books";
 const COVER_MANIFEST_PATH = "/api/cover-manifest";
 const API_CACHE_SECONDS = 300;
-const API_CACHE_VERSION = "5";
+const API_CACHE_VERSION = "6";
 const PDF_EXTENSION = /\.pdf$/i;
 
 const SMALL_WORDS = new Set([
@@ -389,6 +389,13 @@ export function buildPdfjsUrl(baseUrl: string, assetUrl: string): string {
       fileUrl.pathname.startsWith("/pdfs/")) {
     fileUrl.protocol = viewerUrl.protocol;
     fileUrl.host = viewerUrl.host;
+  }
+
+  // Separate the reader-friendly cached response from older JPX/JBIG2 copies.
+  // The Worker keeps the archival R2 object intact and serves a verified
+  // lower-memory derivative when one is available.
+  if (fileUrl.pathname === "/pdfs/viva-el-rey.pdf") {
+    fileUrl.searchParams.set("render", "low-memory-1");
   }
 
   viewerUrl.searchParams.set("file", fileUrl.toString());
