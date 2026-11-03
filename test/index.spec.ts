@@ -69,7 +69,11 @@ describe("Librarium Worker", () => {
     expect(`${readerUrl.origin}${readerUrl.pathname}`).toBe(
       "https://reader.sacrumflorilegium.com/web/viewer.html",
     );
-    expect(readerUrl.searchParams.get("file")).toBe(prayerBook!.assetUrl);
+    const readerFile = new URL(readerUrl.searchParams.get("file")!);
+    expect(`${readerFile.origin}${readerFile.pathname}`).toBe(
+      "https://reader.sacrumflorilegium.com/pdfs/my-prayer-book.pdf",
+    );
+    expect(readerFile.searchParams.get("v")).toBe(assetUrl.searchParams.get("v"));
 
     const sophocles = payload.books.find(
       (book) => book.key === "pdfs/the-theban-plays.pdf",
