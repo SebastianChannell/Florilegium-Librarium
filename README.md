@@ -15,7 +15,7 @@ The repository is currently named `Florilegium-Librariun`; the site and Worker u
   language, a suggested title page, and linked author/classification when the
   evidence is sufficiently clear.
 - Sends every book to the existing PDF.js reader rather than opening the raw PDF.
-- Provides a compact mobile list, instant search, and A–Z or recently-added sorting.
+- Provides a three-column visual catalogue with small title-page thumbnails, optional list view, instant search, and A–Z or recently-added sorting.
 - Caches the generated API response at the edge for five minutes, so new R2 books appear automatically without maintaining a second index.
 
 ## Current production source
@@ -49,6 +49,21 @@ covers/<slug>.webp
 `src/catalog.ts` is only the read-only fallback used if Airtable is temporarily
 unavailable. Normal requests read the live Airtable catalogue at the edge and
 cache it for five minutes.
+
+### Title-page images
+
+The **Books → Cover URL** field in Airtable is the authoritative image source
+for each published book. The catalogue API exposes the URL as `coverUrl`, and
+both the three-column grid and book detail page load that URL directly; they
+do not calculate cover URLs from filenames. Missing or inaccessible images
+fall back to a plain title-page placeholder.
+
+The Cover URL value should point to an actual publicly accessible image.
+A populated URL alone does not guarantee that the R2 object exists.
+Deployments use the Airtable URLs and do not regenerate book covers.
+If an image really needs to be created or repaired, `npm run covers` remains
+available as a separate manual maintenance command (requires Cloudflare
+credentials plus `pdftoppm` and `cwebp`).
 
 ## Reviewed publication
 
