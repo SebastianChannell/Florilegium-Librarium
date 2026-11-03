@@ -15,7 +15,8 @@ The repository is currently named `Florilegium-Librariun`; the site and Worker u
   language, a suggested title page, and linked author/classification when the
   evidence is sufficiently clear.
 - Sends every book to the existing PDF.js reader rather than opening the raw PDF.
-- Provides a three-column visual catalogue with small title-page thumbnails, optional list view, instant search, and A–Z or recently-added sorting.
+- Uses an Orarium-style slide-out sidebar with expandable main classifications (Liturgia, Theologia, Spiritualia, Preces, Auctores) and instant search by title, author, and subject.
+- Opens a selected title directly in the existing PDF.js reader in a new tab. No covers, grids, or intermediate book-detail pages.
 - Caches the generated API response at the edge for five minutes, so new R2 books appear automatically without maintaining a second index.
 
 ## Current production source
@@ -50,13 +51,11 @@ covers/<slug>.webp
 unavailable. Normal requests read the live Airtable catalogue at the edge and
 cache it for five minutes.
 
-### Title-page images
+### Optional title-page assets (not displayed in Librarium)
 
-The **Books → Cover URL** field in Airtable is the authoritative image source
-for each published book. The catalogue API exposes the URL as `coverUrl`, and
-both the three-column grid and book detail page load that URL directly; they
-do not calculate cover URLs from filenames. Missing or inaccessible images
-fall back to a plain title-page placeholder.
+The **Books → Cover URL** field in Airtable remains available as optional
+catalogue metadata, and the API continues to expose `coverUrl` for compatibility.
+The Librarium interface deliberately does not display or request these images.
 
 The Cover URL value should point to an actual publicly accessible image.
 A populated URL alone does not guarantee that the R2 object exists.
