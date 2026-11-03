@@ -1,0 +1,78 @@
+name: Build iPhone-compatible PDF derivative
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/optimize-reader-pdf.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  optimize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Convert scanned JPX/JBIG2 pages without altering original PDF
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ghostscript poppler-utils
+          INPUT=/tmp/viva-el-rey-original.pdf
+          OUTPUT=/tmp/viva-el-rey-reader.pdf
+          curl --fail --location --silent --show-error --max-time 120 \
+            "https://assets.sacrumflorilegium.com/pdfs/viva-el-rey.pdf" -o "$INPUT"
+          echo "Original: $(stat -c%s "$INPUT") bytes"
+          gs -sDEVICE=pdfwrite -dBATCH -dNOPAUSE -dSAFER -dQUIET \
+             -dCompatibilityLevel=1.6 -dDetectDuplicateImages=true \
+             -dAutoFilterColorImages=false -dAutoFilterGrayImages=false \
+             -dColorImageFilter=/DCTEncode -dGrayImageFilter=/DCTEncode \
+             -dDownsampleColorImages=true -dDownsampleGrayImages=true \
+             -dColorImageResolution=200 -dGrayImageResolution=200 \
+             -dDownsampleMonoImages=true -dMonoImageResolution=200 \
+             -sOutputFile="$OUTPUT" "$INPUT"
+          echo "Optimized: $(stat -c%s "$OUTPUT") bytes"
+          ORIGINAL_PAGES=$(pdfinfo "$INPUT" | awk '/^Pages:/ {print $2}')
+          NEW_PAGES=$(pdfinfo "$OUTPUT" | awk '/^Pages:/ {print $2}')
+          echo "Pages: original=$ORIGINAL_PAGES optimized=$NEW_PAGES"
+          test "$ORIGINAL_PAGES" -eq 65
+          test "$NEW_PAGES" -eq "$ORIGINAL_PAGES"
+          pdftotext "$INPUT" /tmp/original.txt
+          pdftotext "$OUTPUT" /tmp/optimized.txt
+          ORIGINAL_TEXT=$(wc -c < /tmp/original.txt)
+          NEW_TEXT=$(wc -c < /tmp/optimized.txt)
+          echo "Text layer bytes: original=$ORIGINAL_TEXT optimized=$NEW_TEXT"
+          if [ "$ORIGINAL_TEXT" -gt 1000 ]; then
+            test "$NEW_TEXT" -ge "$((ORIGINAL_TEXT * 9 / 10))"
+          fi
+          echo "Optimized image formats:"
+          pdfimages -list "$OUTPUT" | awk 'NR > 2 {formats[$9]++} END {for (k in formats) print k,formats[k]}'
+          BAD_CODEC_COUNT=$(pdfimages -list "$OUTPUT" | awk 'NR > 2 && ($9 == "jpx" || $9 == "jbig2") {c++} END {print c+0}')
+          echo "Remaining JPEG2000/JBIG2 streams: $BAD_CODEC_COUNT"
+          test "$BAD_CODEC_COUNT" -eq 0
+          pdftoppm -f 1 -singlefile -scale-to 600 -png "$OUTPUT" /tmp/reader-first-page
+          test -s /tmp/reader-first-page.png
+          echo "Verified: 65 pages, original text preserved (if present), no JPX/JBIG2, rendered first page."
+      - name: Upload only the verified reader derivative to a separate R2 key
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler r2 object put "sacrum-assets/reader-optimized/viva-el-rey.pdf" \
+            --remote --file=/tmp/viva-el-rey-reader.pdf --content-type=application/pdf
+          curl --fail --location --silent --show-error --max-time 120 \
+            "https://assets.sacrumflorilegium.com/reader-optimized/viva-el-rey.pdf?check=${GITHUB_SHA}" \
+            -o /tmp/verified-upload.pdf
+          test "$(pdfinfo /tmp/verified-upload.pdf | awk '/^Pages:/ {print $2}')" -eq 65
+          echo "Uploaded optimized reader copy; original pdfs/viva-el-rey.pdf is unchanged."
