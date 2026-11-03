@@ -5,10 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#070606">
     <meta name="color-scheme" content="dark">
-    <meta
-      name="description"
-      content="A quiet, searchable library of Catholic books and devotional works."
-    >
+    <meta name="description" content="A searchable index of books in Sacrum Florilegium.">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Librarium — Sacrum Florilegium</title>
@@ -18,15 +15,16 @@
     <script type="module" src="./app.js"></script>
   </head>
   <body>
-    <a class="skip-link" href="#library-list">Skip to books</a>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
 
     <div class="site-shell">
       <header class="site-header">
+        <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Open book index" aria-controls="browse-sidebar" aria-expanded="false">›</button>
         <a class="wordmark" href="./" aria-label="Librarium home">
           <span>Sacrum Florilegium</span>
           <strong>Librarium</strong>
         </a>
-        <p class="subtitle">A library of timeless works for the soul.</p>
+        <p class="subtitle">Index librorum.</p>
         <details class="florilegium-menu">
           <summary>
             <span>Sites</span>
@@ -45,109 +43,30 @@
         </details>
       </header>
 
-      <main>
-        <section id="catalogue-view" aria-labelledby="library-heading">
-          <h1 id="library-heading" class="visually-hidden">Library books</h1>
-
+      <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+      <aside id="browse-sidebar" class="browse-sidebar" role="dialog" aria-modal="true" aria-label="Book index" aria-hidden="true" inert>
+        <div class="browse-sidebar-header">
+          <button id="sidebar-close" class="sidebar-close" type="button" aria-label="Close book index">‹</button>
+        </div>
+        <div class="browse-sidebar-content">
           <form id="search-form" class="search" role="search">
-            <label class="visually-hidden" for="search-input">Search the library</label>
+            <label class="visually-hidden" for="search-input">Search books and authors</label>
             <svg class="search-icon" aria-hidden="true" viewBox="0 0 24 24" width="20" height="20">
               <circle cx="11" cy="11" r="6.5"></circle>
               <path d="m16 16 4 4"></path>
             </svg>
-            <input
-              id="search-input"
-              name="q"
-              type="search"
-              inputmode="search"
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="Search books, authors, subjects…"
-            >
+            <input id="search-input" name="q" type="search" inputmode="search" autocomplete="off" spellcheck="false" placeholder="Search titles, authors, subjects…">
+            <button id="clear-search" class="search-clear" type="button" aria-label="Clear search" hidden>×</button>
           </form>
 
-          <nav class="category-browser" aria-labelledby="category-heading">
-            <div class="category-browser-heading">
-              <h2 id="category-heading">Collectiones</h2>
-              <button id="show-all-categories" class="show-all-categories" type="button" hidden>
-                All books
-              </button>
-            </div>
-            <div id="category-list" class="category-list">
-              <button class="category-option" type="button" data-category="" aria-pressed="true">
-                <span class="category-name">Omnes</span>
-                <span class="category-meta"><span class="category-count">0</span></span>
-              </button>
-              <button class="category-option" type="button" data-category="Liturgia" aria-pressed="false">
-                <span class="category-name">Liturgia</span>
-                <span class="category-meta"><span class="category-count">0</span><span aria-hidden="true">›</span></span>
-              </button>
-              <button class="category-option" type="button" data-category="Theologia" aria-pressed="false">
-                <span class="category-name">Theologia</span>
-                <span class="category-meta"><span class="category-count">0</span><span aria-hidden="true">›</span></span>
-              </button>
-              <button class="category-option" type="button" data-category="Spiritualia" aria-pressed="false">
-                <span class="category-name">Spiritualia</span>
-                <span class="category-meta"><span class="category-count">0</span><span aria-hidden="true">›</span></span>
-              </button>
-              <button class="category-option" type="button" data-category="Preces" aria-pressed="false">
-                <span class="category-name">Preces</span>
-                <span class="category-meta"><span class="category-count">0</span><span aria-hidden="true">›</span></span>
-              </button>
-              <button class="category-option" type="button" data-category="Auctores" aria-pressed="false">
-                <span class="category-name">Auctores</span>
-                <span class="category-meta"><span class="category-count">0</span><span aria-hidden="true">›</span></span>
-              </button>
-            </div>
-          </nav>
+          <p id="result-count" class="result-count" aria-live="polite">Loading books…</p>
+          <div id="status-message" class="status-message" role="status" aria-live="polite" hidden></div>
+          <nav id="results" class="index-groups" aria-label="Books by classification"></nav>
+        </div>
+      </aside>
 
-          <div class="browse-tools">
-            <p id="result-count" class="result-count" aria-live="polite">Loading books…</p>
-            <div class="browse-actions">
-              <label class="sort-control">
-                <span class="visually-hidden">Sort books</span>
-                <select id="sort-select" aria-label="Sort books">
-                  <option value="title">Title A–Z</option>
-                  <option value="recent">Recently added</option>
-                </select>
-              </label>
-              <div class="view-toggle" role="group" aria-label="Display books as">
-                <button id="grid-view" class="view-button" type="button" aria-label="Grid" aria-pressed="true" title="Grid view">
-                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-                    <rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect>
-                    <rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect>
-                  </svg>
-                </button>
-                <button id="list-view" class="view-button" type="button" aria-label="List" aria-pressed="false" title="List view">
-                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
-                    <path d="M8 6h13M8 12h13M8 18h13M3 6h1M3 12h1M3 18h1"></path>
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div id="status-message" class="status-message" role="status" aria-live="polite">
-            <span class="loading-mark" aria-hidden="true"></span>
-            <span>Opening the library…</span>
-          </div>
-
-          <ol id="library-list" class="library-list" aria-label="Books" data-view="grid" hidden></ol>
-        </section>
-
-        <section id="book-detail" class="book-detail" aria-labelledby="detail-title" hidden>
-          <button id="back-to-books" class="back-to-books" type="button">← Return to catalogue</button>
-          <div class="detail-layout">
-            <div id="detail-cover" class="detail-cover"></div>
-            <div class="detail-description">
-              <p id="detail-category" class="detail-category"></p>
-              <h1 id="detail-title" class="detail-title"></h1>
-              <p id="detail-author" class="detail-author"></p>
-              <dl id="detail-metadata" class="detail-metadata"></dl>
-              <a id="detail-reader" class="detail-reader">Open in Librarium Reader <span aria-hidden="true">→</span></a>
-            </div>
-          </div>
-        </section>
+      <main id="main-content">
+        <h1 class="visually-hidden">Librarium catalogue</h1>
       </main>
 
       <footer class="site-footer">
@@ -156,8 +75,6 @@
       </footer>
     </div>
 
-    <noscript>
-      <p class="noscript">JavaScript is required to retrieve the library from R2.</p>
-    </noscript>
+    <noscript><p class="noscript">JavaScript is required to search the library.</p></noscript>
   </body>
 </html>
