@@ -34,6 +34,7 @@ jobs:
           echo "Original: $(stat -c%s "$INPUT") bytes"
           gs -sDEVICE=pdfwrite -dBATCH -dNOPAUSE -dSAFER -dQUIET \
              -dCompatibilityLevel=1.6 -dDetectDuplicateImages=true \
+             -dPassThroughJPXImages=false -dPassThroughJPEGImages=false \
              -dAutoFilterColorImages=false -dAutoFilterGrayImages=false \
              -dColorImageFilter=/DCTEncode -dGrayImageFilter=/DCTEncode \
              -dDownsampleColorImages=true -dDownsampleGrayImages=true \
