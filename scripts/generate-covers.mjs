@@ -21,7 +21,7 @@ let skipped = 0;
 
 try {
   for (const cover of covers) {
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(cover.slug) || !Number.isInteger(cover.page) || cover.page < 1) {
+    if (!/^[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*$/u.test(cover.slug) || !Number.isInteger(cover.page) || cover.page < 1) {
       throw new Error(`Unsafe or invalid cover entry: ${JSON.stringify(cover)}`);
     }
     if (!force) {
