@@ -5,7 +5,7 @@ import { ingestLibrary } from "./ingest";
 const API_PATH = "/api/books";
 const COVER_MANIFEST_PATH = "/api/cover-manifest";
 const API_CACHE_SECONDS = 300;
-const API_CACHE_VERSION = "4";
+const API_CACHE_VERSION = "5";
 const PDF_EXTENSION = /\.pdf$/i;
 
 const SMALL_WORDS = new Set([
@@ -380,7 +380,18 @@ function buildVersionedPublicUrl(baseUrl: string, key: string, object: R2Object)
 
 export function buildPdfjsUrl(baseUrl: string, assetUrl: string): string {
   const viewerUrl = new URL(baseUrl);
-  viewerUrl.searchParams.set("file", assetUrl);
+  const fileUrl = new URL(assetUrl);
+
+  // PDF.js must fetch a PDF from its own origin. Using the R2 public URL
+  // directly can be blocked by browser CORS policy, especially on mobile.
+  // The Reader Worker serves these exact R2 keys under /pdfs/ on its origin.
+  if (fileUrl.origin === "https://assets.sacrumflorilegium.com" &&
+      fileUrl.pathname.startsWith("/pdfs/")) {
+    fileUrl.protocol = viewerUrl.protocol;
+    fileUrl.host = viewerUrl.host;
+  }
+
+  viewerUrl.searchParams.set("file", fileUrl.toString());
   return viewerUrl.toString();
 }
 
