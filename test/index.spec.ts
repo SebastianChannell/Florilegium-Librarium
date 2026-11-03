@@ -120,11 +120,14 @@ describe("Librarium Worker", () => {
           dateAdded: "2026-07-11",
           subjects: ["Prayer"],
           language: "English",
-          coverUrl: "",
+          coverUrl: "https://assets.sacrumflorilegium.com/covers/my-prayer-book.webp",
         }],
       ]),
     );
 
     expect(books.map((book) => book.slug)).toEqual(["my-prayer-book"]);
+    expect(books[0].coverUrl).toBe(
+      "https://assets.sacrumflorilegium.com/covers/my-prayer-book.webp",
+    );
   });
 });
