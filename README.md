@@ -17,7 +17,7 @@ The site and Worker use the name **Librarium**.
 - Sends every book to the existing PDF.js reader rather than opening the raw PDF.
 - Uses an Orarium-style slide-out sidebar with expandable main classifications (Liturgia, Theologia, Spiritualia, Preces, Auctores) and instant search by title, author, and subject.
 - Opens a selected title directly in the existing PDF.js reader in a new tab. No covers, grids, or intermediate book-detail pages.
-- Caches the generated API response at the edge for five minutes to reduce Airtable calls. The sidebar Refresh button becomes available after the initial catalogue loads; it checks the latest cached index without bypassing the Worker cache or triggering the daily R2-to-Airtable ingest.
+- Caches the generated API response at the edge for five minutes to reduce Airtable calls. The sidebar Refresh button becomes available after the initial catalogue loads; it runs a key-protected R2-to-Airtable import (up to five changed PDFs per click) and reloads the visible catalogue immediately. A one-minute cooldown prevents accidental duplicate imports.
 
 ## Current production source
 
@@ -78,6 +78,16 @@ credentials plus `pdftoppm` and `cwebp`).
 Replacing a PDF at the same R2 key refreshes its file-derived fields without
 overwriting curated bibliographic metadata or a Published status. The R2 ETag is
 stored as `Content Hash` so unchanged PDFs are not processed twice.
+
+## Owner-authorized manual import
+
+After the catalogue loads, **Import & refresh** appears in the sidebar. On first use, enter the private manual import key. It is held only in memory for the current page session, never in a URL or persistent browser storage. The Worker verifies its SHA-256 digest; the plaintext key is not committed. After the key is accepted, subsequent clicks in the same page session import immediately.
+
+A successful `POST /api/refresh` performs the R2-to-Airtable scan (up to five changed PDFs per request), reloads the Airtable catalogue, updates the Worker's five-minute cache, and immediately updates the page. Additional files are reported as deferred and can be imported on a subsequent manual run. A one-minute cooldown discourages accidental repeats. Ordinary visitors cannot initiate imports without the key.
+
+To rotate the key, generate a new cryptographically random token and replace `MANUAL_REFRESH_KEY_HASH` with its SHA-256 hex digest in `src/index.ts`, then deploy. **Do not put the plaintext key in this repository.**
+
+The monthly Airtable API allowance still applies to both automatic and manual imports.
 
 ## Airtable access
 
