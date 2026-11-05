@@ -200,7 +200,7 @@ async function loadBooks({ manual = false } = {}) {
     renderIndex();
     elements.refresh.hidden = false;
     if (manual) {
-      elements.status.textContent = "Catalogue checked. New changes may take up to five minutes to appear.";
+      elements.status.textContent = "Catalogue checked. Airtable edits may take up to five minutes; new PDFs are imported at the next daily sync.";
       elements.status.hidden = false;
     }
   } catch (error) {
