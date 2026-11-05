@@ -61,8 +61,16 @@
 
           <div class="index-toolbar">
             <p id="result-count" class="result-count" aria-live="polite">Loading books…</p>
-            <button id="refresh-catalogue" class="refresh-button" type="button" aria-label="Refresh catalogue" disabled hidden>Refresh</button>
+            <button id="refresh-catalogue" class="refresh-button" type="button" aria-label="Import new PDFs and refresh catalogue" disabled hidden>Import &amp; refresh</button>
           </div>
+          <form id="refresh-auth-form" class="refresh-auth" hidden>
+            <label for="refresh-key-input">Manual import key</label>
+            <input id="refresh-key-input" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" required>
+            <div class="refresh-auth-actions">
+              <button type="submit">Import now</button>
+              <button type="button" id="refresh-auth-cancel">Cancel</button>
+            </div>
+          </form>
           <div id="status-message" class="status-message" role="status" aria-live="polite" hidden></div>
           <nav id="results" class="index-groups" aria-label="Books by classification"></nav>
         </div>
