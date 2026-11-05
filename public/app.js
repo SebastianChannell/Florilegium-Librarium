@@ -147,10 +147,9 @@ function renderIndex() {
     grouped.get(category).push(book);
   }
 
-  const categories = [
-    ...mainCategories,
-    ...[...grouped.keys()].filter((name) => !mainCategories.includes(name)).sort(titleCollator.compare),
-  ];
+  // Only the established classifications appear in the sidebar. Unclassified
+  // books remain accessible through Omnes and search, without an extra tab.
+  const categories = mainCategories;
   const fragment = document.createDocumentFragment();
   fragment.append(categoryGroup("Omnes", sortedBooks(state.books)));
   for (const category of categories) {
