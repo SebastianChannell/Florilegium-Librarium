@@ -7,6 +7,7 @@ const elements = {
   searchInput: document.getElementById("search-input"),
   clearSearch: document.getElementById("clear-search"),
   count: document.getElementById("result-count"),
+  refresh: document.getElementById("refresh-catalogue"),
   status: document.getElementById("status-message"),
   results: document.getElementById("results"),
 };
@@ -174,33 +175,57 @@ function validBook(book) {
   }
 }
 
-async function loadBooks() {
-  elements.count.textContent = "Loading books…";
-  elements.results.replaceChildren();
-  elements.status.hidden = true;
+async function loadBooks({ manual = false } = {}) {
+  if (manual) {
+    elements.refresh.disabled = true;
+    elements.refresh.textContent = "Checking…";
+    elements.status.hidden = true;
+  } else {
+    elements.count.textContent = "Loading books…";
+    elements.results.replaceChildren();
+    elements.status.hidden = true;
+  }
+
   try {
-    const response = await fetch("/api/books", { headers: { Accept: "application/json" } });
+    // Re-fetch the catalogue, but respect the Worker's shared five-minute cache.
+    // A public button must never force a new Airtable API call on every press.
+    const response = await fetch("/api/books", {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
     if (!response.ok) throw new Error("Catalogue request failed: " + response.status);
     const data = await response.json();
     if (!data || !Array.isArray(data.books)) throw new Error("Invalid catalogue response");
     state.books = data.books.filter(validBook);
     renderIndex();
+    elements.refresh.hidden = false;
+    if (manual) {
+      elements.status.textContent = "Catalogue checked. New changes may take up to five minutes to appear.";
+      elements.status.hidden = false;
+    }
   } catch (error) {
     console.error("Could not load Librarium", error);
-    elements.count.textContent = "Catalogue unavailable";
     elements.status.replaceChildren();
     const message = document.createElement("p");
-    message.textContent = "Books could not be loaded.";
-    const retry = document.createElement("button");
-    retry.className = "retry-button";
-    retry.type = "button";
-    retry.textContent = "Try again";
-    retry.addEventListener("click", loadBooks);
-    elements.status.append(message, retry);
+    message.textContent = manual ? "Could not refresh the catalogue. Showing the previous list." : "Books could not be loaded.";
+    elements.status.append(message);
+    if (!manual) {
+      elements.count.textContent = "Catalogue unavailable";
+      const retry = document.createElement("button");
+      retry.className = "retry-button";
+      retry.type = "button";
+      retry.textContent = "Try again";
+      retry.addEventListener("click", () => loadBooks());
+      elements.status.append(retry);
+    }
     elements.status.hidden = false;
+  } finally {
+    elements.refresh.disabled = false;
+    elements.refresh.textContent = "Refresh";
   }
 }
 
+elements.refresh.addEventListener("click", () => loadBooks({ manual: true }));
 elements.searchInput.value = state.query;
 elements.searchForm.addEventListener("submit", (event) => event.preventDefault());
 elements.searchInput.addEventListener("input", updateSearch);
