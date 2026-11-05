@@ -2,7 +2,7 @@
 
 A mobile-first, searchable index of the PDF books stored in Sacrum Florilegium's Cloudflare R2 library.
 
-The repository is currently named `Florilegium-Librariun`; the site and Worker use the intended product name, **Librarium**.
+The site and Worker use the name **Librarium**.
 
 ## What it does
 
@@ -10,14 +10,14 @@ The repository is currently named `Florilegium-Librariun`; the site and Worker u
 - Includes every `.pdf` object below the configured `pdfs/` prefix.
 - Uses Airtable as the live, canonical catalogue and publishes only records whose
   `Status` is `Published`.
-- Scans `pdfs/` every ten minutes. New PDFs become reviewed-publication drafts
+- Scans `pdfs/` once daily (06:00 UTC). New PDFs become reviewed-publication drafts
   with file data, PDF metadata, page count, searchable-text detection, probable
   language, a suggested title page, and linked author/classification when the
   evidence is sufficiently clear.
 - Sends every book to the existing PDF.js reader rather than opening the raw PDF.
 - Uses an Orarium-style slide-out sidebar with expandable main classifications (Liturgia, Theologia, Spiritualia, Preces, Auctores) and instant search by title, author, and subject.
 - Opens a selected title directly in the existing PDF.js reader in a new tab. No covers, grids, or intermediate book-detail pages.
-- Caches the generated API response at the edge for five minutes, so new R2 books appear automatically without maintaining a second index.
+- Caches the generated API response at the edge for five minutes to reduce Airtable calls. The sidebar Refresh button becomes available after the initial catalogue loads; it checks the latest cached index without bypassing the Worker cache or triggering the daily R2-to-Airtable ingest.
 
 ## Current production source
 
@@ -67,13 +67,13 @@ credentials plus `pdftoppm` and `cwebp`).
 ## Reviewed publication
 
 1. Upload `pdfs/<slug>.pdf` to the `sacrum-assets` R2 bucket.
-2. Within ten minutes, the Worker creates a Books record with `Status = Draft`
+2. After the next daily scan, the Worker creates a Books record with `Status = Draft`
    and `Ingest Status = Review Needed`.
 3. Review the flagged fields in Airtable. Confirm the linked Author and
    Classification, add Subjects, Source, edition information, Original Language,
    OCR, and adjust Cover Page when necessary.
 4. Change `Status` to `Published`. Librarium will include the book after its
-   five-minute catalogue cache expires.
+   five-minute catalogue cache expires (usually within five minutes).
 
 Replacing a PDF at the same R2 key refreshes its file-derived fields without
 overwriting curated bibliographic metadata or a Published status. The R2 ETag is
