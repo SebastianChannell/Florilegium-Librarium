@@ -8,6 +8,9 @@ const elements = {
   clearSearch: document.getElementById("clear-search"),
   count: document.getElementById("result-count"),
   refresh: document.getElementById("refresh-catalogue"),
+  refreshForm: document.getElementById("refresh-auth-form"),
+  refreshKeyInput: document.getElementById("refresh-key-input"),
+  refreshCancel: document.getElementById("refresh-auth-cancel"),
   status: document.getElementById("status-message"),
   results: document.getElementById("results"),
 };
@@ -20,6 +23,7 @@ const state = {
 };
 const expandedGroups = new Set();
 let focusBeforeSidebar = null;
+let manualRefreshKey = "";
 
 function openSidebar(focusSearch = false) {
   if (!document.body.classList.contains("sidebar-open")) {
@@ -175,57 +179,98 @@ function validBook(book) {
   }
 }
 
-async function loadBooks({ manual = false } = {}) {
-  if (manual) {
-    elements.refresh.disabled = true;
-    elements.refresh.textContent = "Checking…";
-    elements.status.hidden = true;
-  } else {
-    elements.count.textContent = "Loading books…";
-    elements.results.replaceChildren();
-    elements.status.hidden = true;
-  }
-
+async function loadBooks() {
+  elements.count.textContent = "Loading books…";
+  elements.results.replaceChildren();
+  elements.status.hidden = true;
   try {
-    // Re-fetch the catalogue, but respect the Worker's shared five-minute cache.
-    // A public button must never force a new Airtable API call on every press.
-    const response = await fetch("/api/books", {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    });
+    const response = await fetch("/api/books", { headers: { Accept: "application/json" }, cache: "no-store" });
     if (!response.ok) throw new Error("Catalogue request failed: " + response.status);
     const data = await response.json();
     if (!data || !Array.isArray(data.books)) throw new Error("Invalid catalogue response");
     state.books = data.books.filter(validBook);
     renderIndex();
     elements.refresh.hidden = false;
-    if (manual) {
-      elements.status.textContent = "Catalogue checked. Airtable edits may take up to five minutes; new PDFs are imported at the next daily sync.";
-      elements.status.hidden = false;
-    }
   } catch (error) {
     console.error("Could not load Librarium", error);
+    elements.count.textContent = "Catalogue unavailable";
     elements.status.replaceChildren();
     const message = document.createElement("p");
-    message.textContent = manual ? "Could not refresh the catalogue. Showing the previous list." : "Books could not be loaded.";
-    elements.status.append(message);
-    if (!manual) {
-      elements.count.textContent = "Catalogue unavailable";
-      const retry = document.createElement("button");
-      retry.className = "retry-button";
-      retry.type = "button";
-      retry.textContent = "Try again";
-      retry.addEventListener("click", () => loadBooks());
-      elements.status.append(retry);
-    }
+    message.textContent = "Books could not be loaded.";
+    const retry = document.createElement("button");
+    retry.className = "retry-button";
+    retry.type = "button";
+    retry.textContent = "Try again";
+    retry.addEventListener("click", loadBooks);
+    elements.status.append(message, retry);
     elements.status.hidden = false;
-  } finally {
-    elements.refresh.disabled = false;
-    elements.refresh.textContent = "Refresh";
   }
 }
 
-elements.refresh.addEventListener("click", () => loadBooks({ manual: true }));
+async function runManualImport() {
+  if (!manualRefreshKey || elements.refresh.disabled) return;
+  elements.refresh.disabled = true;
+  elements.refresh.textContent = "Importing…";
+  elements.status.textContent = "Checking R2 and importing changed PDFs into Airtable…";
+  elements.status.hidden = false;
+  try {
+    const response = await fetch("/api/refresh", {
+      method: "POST",
+      headers: { Accept: "application/json", Authorization: "Bearer " + manualRefreshKey },
+      cache: "no-store",
+    });
+    const data = await response.json();
+    if (response.status === 401) {
+      manualRefreshKey = "";
+      elements.refreshForm.hidden = false;
+      elements.refreshKeyInput.focus();
+      throw new Error("Incorrect manual import key. Please try again.");
+    }
+    if (!response.ok) throw new Error(data.error || "Import failed (" + response.status + ").");
+    if (!Array.isArray(data.books)) throw new Error("Invalid catalogue response.");
+    state.books = data.books.filter(validBook);
+    renderIndex();
+    const imported = data.imported;
+    const changes = imported.created + imported.updated;
+    let message = "Import complete: " + changes + " changed PDF" + (changes === 1 ? "" : "s") +
+      " (" + imported.created + " new, " + imported.updated + " updated). Catalogue refreshed.";
+    if (imported.failed) message += " " + imported.failed + " file(s) failed; review your Worker logs.";
+    if (imported.deferred) message += " " + imported.deferred + " file(s) remain for a later import.";
+    elements.status.textContent = message;
+    elements.status.hidden = false;
+  } catch (error) {
+    console.error("Manual Librarium import failed", error);
+    elements.status.textContent = error.message || "Manual import failed. Previous catalogue retained.";
+    elements.status.hidden = false;
+  } finally {
+    elements.refresh.disabled = false;
+    elements.refresh.textContent = "Import & refresh";
+  }
+}
+
+elements.refresh.addEventListener("click", () => {
+  if (!manualRefreshKey) {
+    elements.refreshForm.hidden = false;
+    elements.refreshKeyInput.focus();
+    return;
+  }
+  void runManualImport();
+});
+elements.refreshForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const key = elements.refreshKeyInput.value.trim();
+  if (!key) return;
+  manualRefreshKey = key; // In-memory only: no localStorage, sessionStorage, or URLs.
+  elements.refreshKeyInput.value = "";
+  elements.refreshForm.hidden = true;
+  void runManualImport();
+});
+elements.refreshCancel.addEventListener("click", () => {
+  elements.refreshKeyInput.value = "";
+  elements.refreshForm.hidden = true;
+  elements.refresh.focus();
+});
+
 elements.searchInput.value = state.query;
 elements.searchForm.addEventListener("submit", (event) => event.preventDefault());
 elements.searchInput.addEventListener("input", updateSearch);
