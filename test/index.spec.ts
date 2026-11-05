@@ -79,9 +79,13 @@ describe("Librarium Worker", () => {
       (book) => book.key === "pdfs/the-theban-plays.pdf",
     );
     expect(sophocles).toMatchObject({
-      category: "Bibliotheca",
+      category: "Auctores",
       collection: "Library",
     });
+
+    expect(payload.books.every((book) =>
+      !["Bibliotheca", "Biblioteca"].includes((book as { category?: string }).category ?? "")
+    )).toBe(true);
 
     const liberUsualis = payload.books.find(
       (book) =>
