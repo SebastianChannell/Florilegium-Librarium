@@ -14,6 +14,7 @@ interface IngestConfig {
   booksTable: string;
   authorsTable: string;
   classificationsTable: string;
+  maxChangedFilesPerRun?: number;
 }
 
 interface BookFields {
@@ -98,7 +99,7 @@ export async function ingestLibrary(
       continue;
     }
 
-    if (changedFilesProcessed >= MAX_CHANGED_FILES_PER_RUN) {
+    if (changedFilesProcessed >= (config.maxChangedFilesPerRun ?? MAX_CHANGED_FILES_PER_RUN)) {
       summary.deferred += 1;
       continue;
     }
