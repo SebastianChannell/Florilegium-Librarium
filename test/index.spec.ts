@@ -107,6 +107,23 @@ describe("Librarium Worker", () => {
     expect(post.headers.get("allow")).toBe("GET, HEAD");
   });
 
+  it("protects the manual Airtable import from unauthenticated requests", async () => {
+    const wrongMethod = await exports.default.fetch("https://librarium.example/api/refresh");
+    expect(wrongMethod.status).toBe(405);
+    expect(wrongMethod.headers.get("allow")).toBe("POST");
+
+    const missingKey = await exports.default.fetch("https://librarium.example/api/refresh", {
+      method: "POST",
+    });
+    expect(missingKey.status).toBe(401);
+
+    const incorrectKey = await exports.default.fetch("https://librarium.example/api/refresh", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + "x".repeat(48) },
+    });
+    expect(incorrectKey.status).toBe(401);
+  });
+
   it("hides an R2 object when it has no published catalogue record", async () => {
     const books = await listBooks(
       env.LIBRARY_BUCKET,
