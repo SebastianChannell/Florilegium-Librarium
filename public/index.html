@@ -59,7 +59,10 @@
             <button id="clear-search" class="search-clear" type="button" aria-label="Clear search" hidden>×</button>
           </form>
 
-          <p id="result-count" class="result-count" aria-live="polite">Loading books…</p>
+          <div class="index-toolbar">
+            <p id="result-count" class="result-count" aria-live="polite">Loading books…</p>
+            <button id="refresh-catalogue" class="refresh-button" type="button" aria-label="Refresh catalogue" disabled hidden>Refresh</button>
+          </div>
           <div id="status-message" class="status-message" role="status" aria-live="polite" hidden></div>
           <nav id="results" class="index-groups" aria-label="Books by classification"></nav>
         </div>
