@@ -4,6 +4,11 @@ import { ingestLibrary } from "./ingest";
 
 const API_PATH = "/api/books";
 const COVER_MANIFEST_PATH = "/api/cover-manifest";
+const MANUAL_REFRESH_PATH = "/api/refresh";
+// SHA-256 of an independently generated 256-bit manual refresh key. The key itself is never shipped in the repository or browser assets.
+const MANUAL_REFRESH_KEY_HASH = "66deace57b2e4e43ab11d58cf7f29660d0dd97216ed19e69f04d28aa51e9294d";
+const MANUAL_REFRESH_LAST_KEY = "system/librarium/last-manual-refresh";
+const MANUAL_REFRESH_COOLDOWN_MS = 60_000;
 const API_CACHE_SECONDS = 300;
 const API_CACHE_VERSION = "6";
 const PDF_EXTENSION = /\.pdf$/i;
@@ -100,6 +105,56 @@ export default {
     ctx: ExecutionContext,
   ): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === MANUAL_REFRESH_PATH) {
+      if (request.method !== "POST") {
+        return Response.json({ error: "Method not allowed." }, { status: 405, headers: { Allow: "POST", "Cache-Control": "no-store" } });
+      }
+      if (!(await hasManualRefreshAccess(request))) {
+        return Response.json({ error: "Invalid refresh key." }, { status: 401, headers: { "Cache-Control": "no-store" } });
+      }
+      if (!env.AIRTABLE_TOKEN) {
+        return Response.json({ error: "Airtable is not configured." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+      }
+      try {
+        const last = await env.LIBRARY_BUCKET.head(MANUAL_REFRESH_LAST_KEY);
+        if (last && Date.now() - last.uploaded.getTime() < MANUAL_REFRESH_COOLDOWN_MS) {
+          const retryAfter = Math.ceil((MANUAL_REFRESH_COOLDOWN_MS - (Date.now() - last.uploaded.getTime())) / 1000);
+          return Response.json({ error: "A manual import just completed. Try again in a minute." }, {
+            status: 429, headers: { "Cache-Control": "no-store", "Retry-After": String(Math.max(1, retryAfter)) },
+          });
+        }
+        const imported = await ingestLibrary(env.LIBRARY_BUCKET, env.AIRTABLE_TOKEN, {
+          prefix: env.R2_PREFIX,
+          publicBaseUrl: env.R2_PUBLIC_BASE_URL,
+          baseId: env.AIRTABLE_BASE_ID,
+          booksTable: env.AIRTABLE_BOOKS_TABLE,
+          authorsTable: env.AIRTABLE_AUTHORS_TABLE,
+          classificationsTable: env.AIRTABLE_CLASSIFICATIONS_TABLE,
+          maxChangedFilesPerRun: 5,
+        });
+        const catalogue = await loadCatalogue(env, true);
+        const books = await listBooks(env.LIBRARY_BUCKET, {
+          prefix: env.R2_PREFIX,
+          publicBaseUrl: env.R2_PUBLIC_BASE_URL,
+          pdfjsBaseUrl: env.PDFJS_BASE_URL,
+        }, catalogue);
+        const payload: LibraryPayload = { books, count: books.length, generatedAt: new Date().toISOString() };
+        const cacheUrl = new URL(API_PATH, request.url);
+        cacheUrl.searchParams.set("catalog", API_CACHE_VERSION);
+        const cacheResponse = Response.json(payload, {
+          headers: { "Cache-Control": `public, max-age=60, s-maxage=${API_CACHE_SECONDS}, stale-while-revalidate=86400` },
+        });
+        await caches.default.put(new Request(cacheUrl), cacheResponse);
+        await env.LIBRARY_BUCKET.put(MANUAL_REFRESH_LAST_KEY, payload.generatedAt, { httpMetadata: { contentType: "text/plain" } });
+        return Response.json({ ...payload, imported }, { headers: { "Cache-Control": "no-store" } });
+      } catch (error: unknown) {
+        console.error(JSON.stringify({ message: "Manual Librarium import failed", error: errorMessage(error) }));
+        return Response.json({ error: "The import could not be completed. Airtable may be unavailable or its API quota exhausted." }, {
+          status: 503, headers: { "Cache-Control": "no-store" },
+        });
+      }
+    }
 
     if (url.pathname === COVER_MANIFEST_PATH) {
       if (request.method !== "GET" && request.method !== "HEAD") {
@@ -305,7 +360,7 @@ export async function listBooks(
 
 const FALLBACK_CATALOGUE = fallbackCatalogue();
 
-async function loadCatalogue(env: Env): Promise<Map<string, CatalogMetadata>> {
+async function loadCatalogue(env: Env, strict = false): Promise<Map<string, CatalogMetadata>> {
   if (!env.AIRTABLE_TOKEN) return FALLBACK_CATALOGUE;
 
   try {
@@ -349,6 +404,7 @@ async function loadCatalogue(env: Env): Promise<Map<string, CatalogMetadata>> {
       message: "Airtable catalogue unavailable; serving the checked-in fallback",
       error: errorMessage(error),
     }));
+    if (strict) throw error;
     return FALLBACK_CATALOGUE;
   }
 }
@@ -490,6 +546,16 @@ function responseForRequest(
     statusText: response.statusText,
     headers,
   });
+}
+
+async function hasManualRefreshAccess(request: Request): Promise<boolean> {
+  const auth = request.headers.get("Authorization") ?? "";
+  if (!auth.startsWith("Bearer ")) return false;
+  const key = auth.slice("Bearer ".length);
+  if (key.length < 32 || key.length > 128) return false;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key));
+  const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return hex === MANUAL_REFRESH_KEY_HASH;
 }
 
 function errorMessage(error: unknown): string {
