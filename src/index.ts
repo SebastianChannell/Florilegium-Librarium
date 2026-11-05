@@ -10,7 +10,7 @@ const MANUAL_REFRESH_KEY_HASH = "66deace57b2e4e43ab11d58cf7f29660d0dd97216ed19e6
 const MANUAL_REFRESH_LAST_KEY = "system/librarium/last-manual-refresh";
 const MANUAL_REFRESH_COOLDOWN_MS = 60_000;
 const API_CACHE_SECONDS = 300;
-const API_CACHE_VERSION = "6";
+const API_CACHE_VERSION = "7";
 const PDF_EXTENSION = /\.pdf$/i;
 
 const SMALL_WORDS = new Set([
@@ -335,7 +335,13 @@ export async function listBooks(
         slug,
         title: metadata?.title ?? titleFromObjectKey(object.key),
         author: metadata?.author ?? "",
-        category: metadata?.classification ?? "Bibliotheca",
+        category: resolveClassification(
+          slug,
+          metadata?.classification,
+          metadata?.title ?? titleFromObjectKey(object.key),
+          metadata?.author,
+          metadata?.subjects,
+        ),
         collection: metadata?.author ?? collectionFromObjectKey(object.key, config.prefix),
         assetUrl,
         readerUrl: buildPdfjsUrl(config.pdfjsBaseUrl, assetUrl),
@@ -358,6 +364,45 @@ export async function listBooks(
   );
 }
 
+// Only these are catalogue classifications. "Bibliotheca" was an old
+// placeholder for a missing classification, not a real browsing category.
+const CLASSIFICATION_NAMES = new Map([
+  ["liturgia", "Liturgia"],
+  ["theologia", "Theologia"],
+  ["spiritualia", "Spiritualia"],
+  ["preces", "Preces"],
+  ["auctores", "Auctores"],
+]);
+
+export function resolveClassification(
+  slug: string,
+  classification?: string,
+  title = "",
+  author = "",
+  subjects: string[] = [],
+): string {
+  const current = CLASSIFICATION_NAMES.get((classification ?? "").trim().toLocaleLowerCase("en-US"));
+  if (current) return current;
+
+  // Prefer reviewed metadata from the checked-in catalogue if Airtable's
+  // classification is empty or the API is temporarily unavailable.
+  const known = BOOKS_BY_SLUG.get(slug)?.classification;
+  if (known) return known;
+
+  // High-confidence title/subject hints help classify newly imported books.
+  // Do not invent a classification for ambiguous works: they remain in Omnes
+  // and search until their Airtable record has been classified.
+  const value = [title, author, ...subjects].join(" ")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("en-US");
+  if (/\b(sophocles|xenophon|homer|virgil|vergil|theban plays|greek tragedies|classical literature|memorabilia|plato|aristophanes)\b/.test(value)) return "Auctores";
+  if (/\b(missal|misal|breviary|breviario|antiphonary|antiphonarius|graduale|liber usualis|liturgy|liturgia|liturgical|little offices?|divine office)\b/.test(value)) return "Liturgia";
+  if (/\b(catechism|catecismo|theology|theologia|theological|dogmatic|eucharistic texts|textos eucaristicos|summa theologica)\b/.test(value)) return "Theologia";
+  if (/\b(prayer book|prayer-book|prayers|oraciones|oracionario|devocionario|manual of devotion|book of devotions|novena|litanies|litany|rosary)\b/.test(value)) return "Preces";
+  if (/\b(devout|devotional|spiritual|meditations?|meditaciones|saints? lives|lives of the saints|martyrs?|scruples|examination of conscience|vida devota|life of christ)\b/.test(value)) return "Spiritualia";
+  return "";
+}
+
 const FALLBACK_CATALOGUE = fallbackCatalogue();
 
 async function loadCatalogue(env: Env, strict = false): Promise<Map<string, CatalogMetadata>> {
@@ -375,7 +420,7 @@ async function loadCatalogue(env: Env, strict = false): Promise<Map<string, Cata
     ]);
 
     const authorNames = new Map(authors.map((record) => [record.id, record.fields.Name ?? ""]));
-    const classNames = new Map(classifications.map((record) => [record.id, record.fields.Class ?? "Bibliotheca"]));
+    const classNames = new Map(classifications.map((record) => [record.id, record.fields.Class?.trim() ?? ""]));
     const catalogue = new Map<string, CatalogMetadata>();
 
     for (const record of books) {
@@ -384,7 +429,7 @@ async function loadCatalogue(env: Env, strict = false): Promise<Map<string, Cata
       if (!slug || !title) continue;
 
       const author = (record.fields.Authors ?? []).map((id) => authorNames.get(id)).filter(Boolean).join("; ");
-      const classification = (record.fields.Classification ?? []).map((id) => classNames.get(id)).find(Boolean) ?? "Bibliotheca";
+      const classification = (record.fields.Classification ?? []).map((id) => classNames.get(id)).find(Boolean) ?? "";
       catalogue.set(slug, {
         slug,
         title,
