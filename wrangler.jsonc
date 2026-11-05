@@ -24,7 +24,7 @@
     "AIRTABLE_CLASSIFICATIONS_TABLE": "Classifications"
   },
   "triggers": {
-    "crons": ["*/10 * * * *"]
+    "crons": ["0 6 * * *"]
   },
   "observability": {
     "enabled": true,
