@@ -26,6 +26,18 @@ describe("Librarium Worker", () => {
         { httpMetadata: { contentType: "application/pdf" } },
       ),
       env.LIBRARY_BUCKET.put("pdfs/ignore-me.txt", "not-a-pdf"),
+      env.LIBRARY_BUCKET.put("pdfs/draft-book.pdf", "test-pdf"),
+      env.LIBRARY_BUCKET.put("system/librarium/catalog-snapshot-v1.json", JSON.stringify({
+        version: 1,
+        generatedAt: new Date().toISOString(),
+        publishedBooks: [
+          { slug: "my-prayer-book", title: "My Prayer-Book", author: "Fr. F. X. Lasance", classification: "Preces", dateAdded: "2026-07-11", subjects: [], language: "", coverUrl: "" },
+          { slug: "liber-usualis-1961", title: "The Liber Usualis (1961)", author: "Benedictines of Solesmes", classification: "Liturgia", dateAdded: "2026-07-11", subjects: [], language: "", coverUrl: "" },
+          { slug: "the-theban-plays", title: "The Theban Plays", author: "", classification: "Auctores", dateAdded: "2026-07-11", subjects: [], language: "", coverUrl: "" },
+        ],
+        covers: [],
+        census: { totalBooks: 4, publishedBooks: 3, draftBooks: 1 },
+      }), { httpMetadata: { contentType: "application/json" } }),
     ]);
   });
 
@@ -48,6 +60,7 @@ describe("Librarium Worker", () => {
     }>();
 
     expect(payload.count).toBe(3);
+    expect(payload.books.some((book) => book.key === "pdfs/draft-book.pdf")).toBe(false);
     expect(payload.books.map((book) => book.title)).toEqual([
       "My Prayer-Book",
       "The Liber Usualis (1961)",
