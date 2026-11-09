@@ -158,6 +158,19 @@ function mapBook(record) {
   };
 }
 
+// Do not re-import into a CSV-seeded destination; Airtable record IDs are absent.
+async function assertEmptySupabaseDestination() {
+  for (const table of ['books','authors','classifications','unpublished','book_authors','book_classifications']) {
+    const url = new URL(`${SUPABASE_URL}/rest/v1/${table}`);
+    url.searchParams.set('select', '*');
+    url.searchParams.set('limit', '1');
+    const response = await fetch(url, { headers: { apikey: SUPABASE_SECRET_KEY } });
+    if (!response.ok) throw new Error(`Could not check Supabase ${table}: HTTP ${response.status}`);
+    const rows = await response.json();
+    if (rows.length) throw new Error(`Supabase ${table} already contains records. The CSV seed is complete; this API importer must not run in apply mode without Airtable-ID reconciliation.`);
+  }
+}
+
 async function main() {
   requireValue(AIRTABLE_TOKEN, "AIRTABLE_TOKEN");
   requireValue(AIRTABLE_BASE_ID, "AIRTABLE_BASE_ID");
@@ -171,6 +184,8 @@ async function main() {
       throw new Error("Use a new Supabase sb_secret_ API key, not a publishable/legacy key.");
     }
   }
+
+  if (APPLY) await assertEmptySupabaseDestination();
 
   const exports = {};
   // Fetch all Airtable data before beginning any Supabase changes.
