@@ -6,7 +6,7 @@ directory switches the website to Supabase.
 
 ## Designed schema
 
-The SQL migration at `migrations/20261109000000_librarium_initial.sql`
+The SQL migration at `migrations/20261109192746_librarium_initial.sql`
 creates the following tables in a **new, otherwise empty Supabase project**:
 
 | Table | Use |
