@@ -8,8 +8,9 @@ The site and Worker use the name **Librarium**.
 
 - Reads the live R2 object list directly through a Worker binding.
 - Includes every `.pdf` object below the configured `pdfs/` prefix.
-- Uses Airtable as the live, canonical catalogue and publishes only records whose
-  `Status` is `Published`.
+- Uses Airtable only for the scheduled R2 import and authenticated manual refresh.
+  Both Librarium and Census read the same R2 JSON snapshot for ordinary page visits.
+  Only records with `Status = Published` appear in Librarium.
 - Scans `pdfs/` once daily (06:00 UTC). New PDFs become reviewed-publication drafts
   with file data, PDF metadata, page count, searchable-text detection, probable
   language, a suggested title page, and linked author/classification when the
@@ -17,7 +18,8 @@ The site and Worker use the name **Librarium**.
 - Sends every book to the existing PDF.js reader rather than opening the raw PDF.
 - Uses an Orarium-style slide-out sidebar with expandable main classifications (Liturgia, Theologia, Spiritualia, Preces, Auctores) and instant search by title, author, and subject.
 - Opens a selected title directly in the existing PDF.js reader in a new tab. No covers, grids, or intermediate book-detail pages.
-- Caches the generated API response at the edge for five minutes to reduce Airtable calls. The sidebar Refresh button becomes available after the initial catalogue loads; it runs a key-protected R2-to-Airtable import (up to five changed PDFs per click) and reloads the visible catalogue immediately. A one-minute cooldown prevents accidental duplicate imports.
+- Caches the generated API response at the edge for five minutes; cache misses read R2,
+  not Airtable. The sidebar Refresh button becomes available after the initial catalogue loads; it runs a key-protected R2-to-Airtable import (up to five changed PDFs per click) and reloads the visible catalogue immediately. A one-minute cooldown prevents accidental duplicate imports.
 
 ## Current production source
 
@@ -47,9 +49,11 @@ pdfs/<slug>.pdf
 covers/<slug>.webp
 ```
 
-`src/catalog.ts` is only the read-only fallback used if Airtable is temporarily
-unavailable. Normal requests read the live Airtable catalogue at the edge and
-cache it for five minutes.
+`src/catalog.ts` is the limited, read-only fallback used if the shared R2 snapshot
+is missing or corrupt. Normal requests read `system/librarium/catalog-snapshot-v1.json`
+from the `sacrum-assets` R2 bucket and cache the response for five minutes.
+The fallback shows only its explicitly listed titles; unreviewed R2 PDFs are not
+published merely because the snapshot is unavailable.
 
 ### Optional title-page assets (not displayed in Librarium)
 
@@ -83,16 +87,40 @@ stored as `Content Hash` so unchanged PDFs are not processed twice.
 
 After the catalogue loads, **Import & refresh** appears in the sidebar. On first use, enter the private manual import key. It is held only in memory for the current page session, never in a URL or persistent browser storage. The Worker verifies its SHA-256 digest; the plaintext key is not committed. After the key is accepted, subsequent clicks in the same page session import immediately.
 
-A successful `POST /api/refresh` performs the R2-to-Airtable scan (up to five changed PDFs per request), reloads the Airtable catalogue, updates the Worker's five-minute cache, and immediately updates the page. Additional files are reported as deferred and can be imported on a subsequent manual run. A one-minute cooldown discourages accidental repeats. Ordinary visitors cannot initiate imports without the key.
+A successful `POST /api/refresh` performs the R2-to-Airtable scan (up to five changed PDFs per request), rebuilds the shared R2 snapshot from Airtable, updates the Worker's five-minute cache, and immediately updates the page. Additional files are reported as deferred and can be imported on a subsequent manual run. A one-minute cooldown discourages accidental repeats. Ordinary visitors cannot initiate imports without the key.
 
 To rotate the key, generate a new cryptographically random token and replace `MANUAL_REFRESH_KEY_HASH` with its SHA-256 hex digest in `src/index.ts`, then deploy. **Do not put the plaintext key in this repository.**
 
-The monthly Airtable API allowance still applies to both automatic and manual imports.
+The monthly Airtable API allowance applies only to the automatic daily import,
+manual imports, and their snapshot rebuilds. Ordinary Librarium and Census visits
+never call Airtable.
+
+
+## Shared snapshot and initial activation
+
+The daily 06:00 UTC cron scans R2 for new/changed PDFs, then publishes a fresh
+snapshot at `system/librarium/catalog-snapshot-v1.json` in the existing R2
+bucket. The authorized **Import & refresh** button does the same immediately.
+The snapshot contains published catalog fields, the existing cover-manifest
+fields, and precomputed Census statistics. It does **not** contain all raw
+Airtable records or credentials (important because asset buckets may expose
+stored objects publicly). The previous snapshot is retained if the import
+or snapshot build fails.
+
+**First activation requires one successful Airtable synchronization.** If
+Airtable's monthly API allowance is exhausted, the snapshot cannot be built.
+Until then Librarium serves the small checked-in catalog and Census reports
+that the snapshot is uninitialized. Once Airtable access resumes, use the
+authorized Import & refresh button, or let the daily cron initialize it.
+
+Publication remains review-gated: new PDFs are drafts until manually marked
+`Published` in Airtable. R2 PDFs absent from the published snapshot remain
+hidden.
 
 ## Airtable access
 
 The Worker requires an Airtable personal access token with read/write access to
-records in the Librarium base. Store it as a Cloudflare Worker secret; never add
+records in the Librarium base for daily/manual synchronization only. Store it as a Cloudflare Worker secret; never add
 it to this repository:
 
 ```bash
