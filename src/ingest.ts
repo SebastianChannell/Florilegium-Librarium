@@ -1,5 +1,5 @@
 import { getDocumentProxy, getMeta } from "unpdf";
-import { AirtableClient, escapeFormula } from "./airtable";
+import { CatalogClient } from "./catalog-db";
 
 const PDF_EXTENSION = /\.pdf$/i;
 const MAX_INSPECTION_BYTES = 25 * 1024 * 1024;
@@ -10,7 +10,7 @@ const SMALL_WORDS = new Set(["a", "an", "and", "at", "by", "for", "from", "in", 
 interface IngestConfig {
   prefix: string;
   publicBaseUrl: string;
-  baseId: string;
+  projectUrl: string;
   booksTable: string;
   authorsTable: string;
   classificationsTable: string;
@@ -44,13 +44,13 @@ export async function ingestLibrary(
   token: string,
   config: IngestConfig,
 ): Promise<IngestSummary> {
-  const airtable = new AirtableClient(token, config.baseId);
+  const catalog = new CatalogClient(token, config.projectUrl);
   const [books, authors, classifications, objects] = await Promise.all([
-    airtable.list<BookFields>(config.booksTable, {
+    catalog.list<BookFields>(config.booksTable, {
       fields: ["Slug", "R2 Key", "Content Hash", "Status", "Cover Page"],
     }),
-    airtable.list<NamedFields>(config.authorsTable, { fields: ["Name"] }),
-    airtable.list<NamedFields>(config.classificationsTable, {
+    catalog.list<NamedFields>(config.authorsTable, { fields: ["Name"] }),
+    catalog.list<NamedFields>(config.classificationsTable, {
       fields: ["Class"],
     }),
     listPdfObjects(bucket, config.prefix),
@@ -88,7 +88,7 @@ export async function ingestLibrary(
 
   let changedFilesProcessed = 0;
 
-  // Sequential processing stays comfortably below Airtable's per-base rate limit.
+  // Sequential processing bounds PDF inspection and Supabase writes.
   for (const object of objects) {
     const slug = slugFromKey(object.key);
     const existing = bookByKey.get(object.key) ?? bookBySlug.get(slug);
@@ -109,7 +109,7 @@ export async function ingestLibrary(
       let fields: Record<string, unknown>;
       try {
         fields = await inspectPdf(bucket, object, slug, config, {
-          airtable,
+          catalog,
           authorByName,
           classificationByName,
         }, !existing);
@@ -125,7 +125,10 @@ export async function ingestLibrary(
       if (existing) {
         // A changed file refreshes only operational/file-derived fields. Curated
         // catalogue choices and Published status are never silently overwritten.
-        const { Title: _title, Authors: _authors, Classification: _class, Status: _status, ...safeFields } = fields;
+        const {
+          Title: _title, Authors: _authors, Classification: _class, Status: _status,
+          "Date Added": _dateAdded, "Cover URL": _coverUrl, ...safeFields
+        } = fields;
         if (existing.fields["Cover Page"] !== undefined) {
           delete safeFields["Cover Page"];
         }
@@ -133,17 +136,17 @@ export async function ingestLibrary(
           safeFields["Ingest Status"] = "Ready";
           safeFields["Ingest Message"] = "File data refreshed. Published catalogue metadata was preserved.";
         }
-        await airtable.update(config.booksTable, existing.id, safeFields);
+        await catalog.update(config.booksTable, existing.id, safeFields);
         summary.updated += 1;
       } else {
-        await airtable.create(config.booksTable, fields);
+        await catalog.create(config.booksTable, fields);
         summary.created += 1;
       }
     } catch (error: unknown) {
       summary.failed += 1;
       const message = error instanceof Error ? error.message : String(error);
       if (existing) {
-        await airtable.update(config.booksTable, existing.id, {
+        await catalog.update(config.booksTable, existing.id, {
           "Ingest Status": "Failed",
           "Ingest Message": message.slice(0, 5000),
           "Last Ingested": new Date().toISOString(),
@@ -162,7 +165,7 @@ async function inspectPdf(
   slug: string,
   config: IngestConfig,
   lookup: {
-    airtable: AirtableClient;
+    catalog: CatalogClient;
     authorByName: Map<string, string>;
     classificationByName: Map<string, string>;
   },
@@ -203,7 +206,7 @@ async function inspectPdf(
   const title = isUsefulTitle(rawTitle) ? rawTitle!.trim() : titleFromObjectKey(object.key);
   const authorName = cleanAuthor(rawAuthor);
   const authorId = authorName && createLinks
-    ? await ensureAuthor(lookup.airtable, config.authorsTable, authorName, lookup.authorByName)
+    ? await ensureAuthor(lookup.catalog, config.authorsTable, authorName, lookup.authorByName)
     : undefined;
   const classification = chooseClassification(`${title}\n${sample}`, lookup.classificationByName);
   const language = detectLanguage(sample);
@@ -254,7 +257,7 @@ function baseFields(
 }
 
 async function ensureAuthor(
-  airtable: AirtableClient,
+  catalog: CatalogClient,
   table: string,
   name: string,
   authorByName: Map<string, string>,
@@ -263,18 +266,14 @@ async function ensureAuthor(
   const existing = authorByName.get(key);
   if (existing) return existing;
 
-  // Recheck Airtable to avoid duplicates if simultaneous ingest runs overlap.
-  const matches = await airtable.list<NamedFields>(table, {
-    fields: ["Name"],
-    filterByFormula: `LOWER({Name})='${escapeFormula(name.toLocaleLowerCase("en-US"))}'`,
-    maxRecords: 1,
-  });
-  if (matches[0]) {
-    authorByName.set(key, matches[0].id);
-    return matches[0].id;
+  // Recheck Supabase, since a manual import may overlap a scheduled run.
+  const found = await catalog.findAuthorByName(name);
+  if (found) {
+    authorByName.set(key, found.id);
+    return found.id;
   }
 
-  const created = await airtable.create<NamedFields>(table, {
+  const created = await catalog.create<NamedFields>(table, {
     Name: name,
     "Sort Name": sortName(name),
   });

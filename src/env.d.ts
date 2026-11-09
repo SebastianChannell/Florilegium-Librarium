@@ -1,7 +1,5 @@
 interface Env {
-  AIRTABLE_TOKEN?: string;
-  AIRTABLE_BASE_ID: string;
-  AIRTABLE_BOOKS_TABLE: string;
-  AIRTABLE_AUTHORS_TABLE: string;
-  AIRTABLE_CLASSIFICATIONS_TABLE: string;
+  /** Server-only Cloudflare Worker secret; never place in wrangler vars. */
+  SUPABASE_SECRET_KEY?: string;
+  SUPABASE_URL: string;
 }

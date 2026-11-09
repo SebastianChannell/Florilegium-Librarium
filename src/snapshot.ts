@@ -1,4 +1,4 @@
-import { AirtableClient, type AirtableRecord } from "./airtable";
+import { CatalogClient, type CatalogRecord } from "./catalog-db";
 
 // The bucket may also have a public asset origin. Do not put entire draft records
 // or database credentials into this snapshot.
@@ -60,7 +60,7 @@ export interface CatalogSnapshot {
 }
 
 interface SnapshotConfig {
-  baseId: string;
+  projectUrl: string;
   booksTable: string;
   authorsTable: string;
   classificationsTable: string;
@@ -86,9 +86,9 @@ function countBy(groups: string[][]): Array<{ name: string; count: number }> {
 }
 
 function calculateCensusStats(
-  booksRaw: Array<AirtableRecord<BookFields>>,
-  authorsRaw: Array<AirtableRecord<AuthorFields>>,
-  classesRaw: Array<AirtableRecord<ClassificationFields>>,
+  booksRaw: Array<CatalogRecord<BookFields>>,
+  authorsRaw: Array<CatalogRecord<AuthorFields>>,
+  classesRaw: Array<CatalogRecord<ClassificationFields>>,
 ) {
   const authorMap = new Map(authorsRaw.map((r) => [r.id, asText(r.fields.Name) || r.id]));
   const classMap = new Map(classesRaw.map((r) => [r.id, asText(r.fields.Class) || r.id]));
@@ -155,14 +155,14 @@ export async function buildAndSaveSnapshot(
   airtableToken: string,
   config: SnapshotConfig,
 ): Promise<CatalogSnapshot> {
-  const airtable = new AirtableClient(airtableToken, config.baseId);
+  const airtable = new CatalogClient(airtableToken, config.projectUrl);
   const [books, authors, classifications] = await Promise.all([
     airtable.list<BookFields>(config.booksTable),
     airtable.list<AuthorFields>(config.authorsTable),
     airtable.list<ClassificationFields>(config.classificationsTable),
   ]);
-  // Never replace a previously good snapshot with an accidentally empty export.
-  if (books.length === 0) throw new Error("Airtable returned no books; snapshot not replaced.");
+  // Never replace a previously good snapshot with an accidentally empty database response.
+  if (books.length === 0) throw new Error("Supabase returned no books; snapshot not replaced.");
 
   const authorNames = new Map(authors.map((r) => [r.id, asText(r.fields.Name)]));
   const classificationNames = new Map(classifications.map((r) => [r.id, asText(r.fields.Class)]));

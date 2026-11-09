@@ -124,7 +124,7 @@ describe("Librarium Worker", () => {
     expect(post.headers.get("allow")).toBe("GET, HEAD");
   });
 
-  it("protects the manual Airtable import from unauthenticated requests", async () => {
+  it("protects the manual Supabase import from unauthenticated requests", async () => {
     const wrongMethod = await exports.default.fetch("https://librarium.example/api/refresh");
     expect(wrongMethod.status).toBe(405);
     expect(wrongMethod.headers.get("allow")).toBe("POST");

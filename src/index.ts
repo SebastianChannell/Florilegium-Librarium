@@ -10,7 +10,7 @@ const MANUAL_REFRESH_KEY_HASH = "66deace57b2e4e43ab11d58cf7f29660d0dd97216ed19e6
 const MANUAL_REFRESH_LAST_KEY = "system/librarium/last-manual-refresh";
 const MANUAL_REFRESH_COOLDOWN_MS = 60_000;
 const API_CACHE_SECONDS = 300;
-const API_CACHE_VERSION = "8";
+const API_CACHE_VERSION = "9";
 const PDF_EXTENSION = /\.pdf$/i;
 
 const SMALL_WORDS = new Set([
@@ -113,8 +113,8 @@ export default {
       if (!(await hasManualRefreshAccess(request))) {
         return Response.json({ error: "Invalid refresh key." }, { status: 401, headers: { "Cache-Control": "no-store" } });
       }
-      if (!env.AIRTABLE_TOKEN) {
-        return Response.json({ error: "Airtable is not configured." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+      if (!env.SUPABASE_SECRET_KEY) {
+        return Response.json({ error: "Supabase secret is not configured." }, { status: 503, headers: { "Cache-Control": "no-store" } });
       }
       try {
         const last = await env.LIBRARY_BUCKET.head(MANUAL_REFRESH_LAST_KEY);
@@ -124,20 +124,20 @@ export default {
             status: 429, headers: { "Cache-Control": "no-store", "Retry-After": String(Math.max(1, retryAfter)) },
           });
         }
-        const imported = await ingestLibrary(env.LIBRARY_BUCKET, env.AIRTABLE_TOKEN, {
+        const imported = await ingestLibrary(env.LIBRARY_BUCKET, env.SUPABASE_SECRET_KEY, {
           prefix: env.R2_PREFIX,
           publicBaseUrl: env.R2_PUBLIC_BASE_URL,
-          baseId: env.AIRTABLE_BASE_ID,
-          booksTable: env.AIRTABLE_BOOKS_TABLE,
-          authorsTable: env.AIRTABLE_AUTHORS_TABLE,
-          classificationsTable: env.AIRTABLE_CLASSIFICATIONS_TABLE,
+          projectUrl: env.SUPABASE_URL,
+          booksTable: "Books",
+          authorsTable: "Authors",
+          classificationsTable: "Classifications",
           maxChangedFilesPerRun: 5,
         });
-        await buildAndSaveSnapshot(env.LIBRARY_BUCKET, env.AIRTABLE_TOKEN, {
-          baseId: env.AIRTABLE_BASE_ID,
-          booksTable: env.AIRTABLE_BOOKS_TABLE,
-          authorsTable: env.AIRTABLE_AUTHORS_TABLE,
-          classificationsTable: env.AIRTABLE_CLASSIFICATIONS_TABLE,
+        await buildAndSaveSnapshot(env.LIBRARY_BUCKET, env.SUPABASE_SECRET_KEY, {
+          projectUrl: env.SUPABASE_URL,
+          booksTable: "Books",
+          authorsTable: "Authors",
+          classificationsTable: "Classifications",
         });
         const catalogue = await loadCatalogue(env, true);
         const books = await listBooks(env.LIBRARY_BUCKET, {
@@ -156,7 +156,7 @@ export default {
         return Response.json({ ...payload, imported }, { headers: { "Cache-Control": "no-store" } });
       } catch (error: unknown) {
         console.error(JSON.stringify({ message: "Manual Librarium import failed", error: errorMessage(error) }));
-        return Response.json({ error: "The import could not be completed. Airtable may be unavailable or its API quota exhausted." }, {
+        return Response.json({ error: "The import could not be completed. Supabase may be unavailable or not configured." }, {
           status: 503, headers: { "Cache-Control": "no-store" },
         });
       }
@@ -278,26 +278,26 @@ export default {
   },
 
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    if (!env.AIRTABLE_TOKEN) {
-      console.error("Librarium ingest skipped: AIRTABLE_TOKEN is not configured.");
+    if (!env.SUPABASE_SECRET_KEY) {
+      console.error("Librarium ingest skipped: SUPABASE_SECRET_KEY is not configured.");
       return;
     }
 
     ctx.waitUntil(
-      ingestLibrary(env.LIBRARY_BUCKET, env.AIRTABLE_TOKEN, {
+      ingestLibrary(env.LIBRARY_BUCKET, env.SUPABASE_SECRET_KEY, {
         prefix: env.R2_PREFIX,
         publicBaseUrl: env.R2_PUBLIC_BASE_URL,
-        baseId: env.AIRTABLE_BASE_ID,
-        booksTable: env.AIRTABLE_BOOKS_TABLE,
-        authorsTable: env.AIRTABLE_AUTHORS_TABLE,
-        classificationsTable: env.AIRTABLE_CLASSIFICATIONS_TABLE,
+        projectUrl: env.SUPABASE_URL,
+        booksTable: "Books",
+        authorsTable: "Authors",
+        classificationsTable: "Classifications",
       }).then(async (summary) => {
         console.log(JSON.stringify({ message: "Librarium ingest completed", ...summary }));
-        const snapshot = await buildAndSaveSnapshot(env.LIBRARY_BUCKET, env.AIRTABLE_TOKEN!, {
-          baseId: env.AIRTABLE_BASE_ID,
-          booksTable: env.AIRTABLE_BOOKS_TABLE,
-          authorsTable: env.AIRTABLE_AUTHORS_TABLE,
-          classificationsTable: env.AIRTABLE_CLASSIFICATIONS_TABLE,
+        const snapshot = await buildAndSaveSnapshot(env.LIBRARY_BUCKET, env.SUPABASE_SECRET_KEY!, {
+          projectUrl: env.SUPABASE_URL,
+          booksTable: "Books",
+          authorsTable: "Authors",
+          classificationsTable: "Classifications",
         });
         console.log(JSON.stringify({ message: "Librarium snapshot updated", generatedAt: snapshot.generatedAt }));
       }).catch((error: unknown) => {
@@ -331,7 +331,7 @@ export async function listBooks(
       const slug = slugFromObjectKey(object.key);
       const metadata = catalogue.get(slug);
 
-      // R2 is the file store, but Airtable controls publication. Uncatalogued
+      // R2 is the file store, but Supabase controls publication. Uncatalogued
       // objects remain invisible until their reviewed record is Published.
       if (!metadata) {
         continue;
@@ -390,14 +390,14 @@ export function resolveClassification(
   const current = CLASSIFICATION_NAMES.get((classification ?? "").trim().toLocaleLowerCase("en-US"));
   if (current) return current;
 
-  // Prefer reviewed metadata from the checked-in catalogue if Airtable's
+  // Prefer reviewed metadata from the checked-in catalogue if Supabase's
   // classification is empty or the API is temporarily unavailable.
   const known = BOOKS_BY_SLUG.get(slug)?.classification;
   if (known) return known;
 
   // High-confidence title/subject hints help classify newly imported books.
   // Do not invent a classification for ambiguous works: they remain in Omnes
-  // and search until their Airtable record has been classified.
+  // and search until their Supabase record has been classified.
   const value = [title, author, ...subjects].join(" ")
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .toLocaleLowerCase("en-US");
