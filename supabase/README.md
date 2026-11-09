@@ -85,6 +85,40 @@ back to Airtable; treat it as a **one-time migration**, not continuous sync.
   write to Supabase instead of Airtable; keep normal Librarium/Census reads on R2.
 - Retain the original Airtable base and a backup for rollback.
 
+
+## CSV seed completed — 9 November 2026
+
+The connected Supabase Librarium project was initialized from the uploaded
+`Books-Overview.csv` and `Books-Unpublished.csv` exports.
+
+Verified destination counts:
+
+| Destination | Count |
+| --- | ---: |
+| Books (all Published) | 88 |
+| Authors reconstructed from linked display names | 52 |
+| Classifications | 5 |
+| Book–author relationships | 92 |
+| Book–classification relationships | 88 |
+| Books with populated Notes | 33 |
+| Unpublished | 0 |
+
+The original Airtable record IDs were **not included in these CSV views**.
+Therefore `airtable_id` is null for the imported records, while the source
+book fields are preserved in `books.airtable_fields`. The author and
+classification reference tables were reconstructed from book display labels,
+without assuming that the missing Airtable reference-table metadata exists.
+
+**Do not run the API-based importer against this populated project.**
+Its `--apply` mode now rejects a nonempty Supabase database, preventing
+duplicate authors and conflicting book slugs. Any later Airtable import
+must explicitly reconcile source record IDs with existing slugs and names.
+
+The project remains separated from the production Cloudflare Worker. The
+R2-snapshot publishing and daily/manual R2 inspection still need a deliberate
+Supabase cutover and server-side secret provisioning. No PDF or cover assets
+have moved out of R2.
+
 ## Current limits
 
 Airtable's API quota is exhausted, so the exact live field schema and counts
