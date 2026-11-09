@@ -348,7 +348,7 @@ export async function listBooks(
           metadata?.author,
           metadata?.subjects,
         ),
-        collection: metadata?.author ?? collectionFromObjectKey(object.key, config.prefix),
+        collection: metadata?.author || collectionFromObjectKey(object.key, config.prefix),
         assetUrl,
         readerUrl: buildPdfjsUrl(config.pdfjsBaseUrl, assetUrl),
         uploaded: metadata
