@@ -1,5 +1,5 @@
 import { BOOKS_BY_SLUG } from "./catalog";
-import { AirtableClient } from "./airtable";
+import { buildAndSaveSnapshot, readSnapshot } from "./snapshot";
 import { ingestLibrary } from "./ingest";
 
 const API_PATH = "/api/books";
@@ -10,7 +10,7 @@ const MANUAL_REFRESH_KEY_HASH = "66deace57b2e4e43ab11d58cf7f29660d0dd97216ed19e6
 const MANUAL_REFRESH_LAST_KEY = "system/librarium/last-manual-refresh";
 const MANUAL_REFRESH_COOLDOWN_MS = 60_000;
 const API_CACHE_SECONDS = 300;
-const API_CACHE_VERSION = "7";
+const API_CACHE_VERSION = "8";
 const PDF_EXTENSION = /\.pdf$/i;
 
 const SMALL_WORDS = new Set([
@@ -133,6 +133,12 @@ export default {
           classificationsTable: env.AIRTABLE_CLASSIFICATIONS_TABLE,
           maxChangedFilesPerRun: 5,
         });
+        await buildAndSaveSnapshot(env.LIBRARY_BUCKET, env.AIRTABLE_TOKEN, {
+          baseId: env.AIRTABLE_BASE_ID,
+          booksTable: env.AIRTABLE_BOOKS_TABLE,
+          authorsTable: env.AIRTABLE_AUTHORS_TABLE,
+          classificationsTable: env.AIRTABLE_CLASSIFICATIONS_TABLE,
+        });
         const catalogue = await loadCatalogue(env, true);
         const books = await listBooks(env.LIBRARY_BUCKET, {
           prefix: env.R2_PREFIX,
@@ -160,29 +166,20 @@ export default {
       if (request.method !== "GET" && request.method !== "HEAD") {
         return new Response(null, { status: 405, headers: { Allow: "GET, HEAD" } });
       }
-      if (!env.AIRTABLE_TOKEN) {
-        return Response.json({ error: "Airtable is not configured." }, { status: 503 });
-      }
-
       try {
-        const airtable = new AirtableClient(env.AIRTABLE_TOKEN, env.AIRTABLE_BASE_ID);
-        const records = await airtable.list<BookRecordFields>(env.AIRTABLE_BOOKS_TABLE, {
-          fields: ["Title", "Slug", "R2 Key", "Cover Page", "Cover URL"],
-        });
-        const covers = records.flatMap((record) => {
-          const slug = record.fields.Slug?.trim();
-          const pdfKey = record.fields["R2 Key"]?.trim();
-          const page = record.fields["Cover Page"];
-          const coverUrl = record.fields["Cover URL"]?.trim();
-          if (!slug || !pdfKey || !coverUrl || !page || page < 1) return [];
-          return [{
-            title: record.fields.Title?.trim() ?? slug,
-            slug,
-            pdfUrl: buildPublicUrl(env.R2_PUBLIC_BASE_URL, pdfKey),
-            coverUrl,
-            page: Math.floor(page),
-          }];
-        });
+        const snapshot = await readSnapshot(env.LIBRARY_BUCKET);
+        if (!snapshot) {
+          return Response.json({ error: "Catalogue snapshot not yet initialized." }, {
+            status: 503, headers: { "Cache-Control": "no-store" },
+          });
+        }
+        const covers = snapshot.covers.map((cover) => ({
+          title: cover.title,
+          slug: cover.slug,
+          pdfUrl: buildPublicUrl(env.R2_PUBLIC_BASE_URL, cover.pdfKey),
+          coverUrl: cover.coverUrl,
+          page: cover.page,
+        }));
         const response = Response.json({ covers, count: covers.length }, {
           headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
         });
@@ -294,8 +291,17 @@ export default {
         booksTable: env.AIRTABLE_BOOKS_TABLE,
         authorsTable: env.AIRTABLE_AUTHORS_TABLE,
         classificationsTable: env.AIRTABLE_CLASSIFICATIONS_TABLE,
-      }).then((summary) => {
+      }).then(async (summary) => {
         console.log(JSON.stringify({ message: "Librarium ingest completed", ...summary }));
+        const snapshot = await buildAndSaveSnapshot(env.LIBRARY_BUCKET, env.AIRTABLE_TOKEN!, {
+          baseId: env.AIRTABLE_BASE_ID,
+          booksTable: env.AIRTABLE_BOOKS_TABLE,
+          authorsTable: env.AIRTABLE_AUTHORS_TABLE,
+          classificationsTable: env.AIRTABLE_CLASSIFICATIONS_TABLE,
+        });
+        console.log(JSON.stringify({ message: "Librarium snapshot updated", generatedAt: snapshot.generatedAt }));
+      }).catch((error: unknown) => {
+        console.error(JSON.stringify({ message: "Librarium daily ingest/snapshot failed; retaining last good snapshot", error: errorMessage(error) }));
       }),
     );
   },
@@ -327,7 +333,7 @@ export async function listBooks(
 
       // R2 is the file store, but Airtable controls publication. Uncatalogued
       // objects remain invisible until their reviewed record is Published.
-      if (!metadata && catalogue !== FALLBACK_CATALOGUE) {
+      if (!metadata) {
         continue;
       }
       books.push({
@@ -406,47 +412,17 @@ export function resolveClassification(
 const FALLBACK_CATALOGUE = fallbackCatalogue();
 
 async function loadCatalogue(env: Env, strict = false): Promise<Map<string, CatalogMetadata>> {
-  if (!env.AIRTABLE_TOKEN) return FALLBACK_CATALOGUE;
-
   try {
-    const airtable = new AirtableClient(env.AIRTABLE_TOKEN, env.AIRTABLE_BASE_ID);
-    const [books, authors, classifications] = await Promise.all([
-      airtable.list<BookRecordFields>(env.AIRTABLE_BOOKS_TABLE, {
-        fields: ["Title", "Authors", "Classification", "Subjects", "Language", "Pages", "Date Added", "Slug", "Cover URL", "Status"],
-        filterByFormula: "{Status}='Published'",
-      }),
-      airtable.list<AuthorRecordFields>(env.AIRTABLE_AUTHORS_TABLE, { fields: ["Name"] }),
-      airtable.list<ClassificationRecordFields>(env.AIRTABLE_CLASSIFICATIONS_TABLE, { fields: ["Class"] }),
-    ]);
-
-    const authorNames = new Map(authors.map((record) => [record.id, record.fields.Name ?? ""]));
-    const classNames = new Map(classifications.map((record) => [record.id, record.fields.Class?.trim() ?? ""]));
-    const catalogue = new Map<string, CatalogMetadata>();
-
-    for (const record of books) {
-      const slug = record.fields.Slug?.trim();
-      const title = record.fields.Title?.trim();
-      if (!slug || !title) continue;
-
-      const author = (record.fields.Authors ?? []).map((id) => authorNames.get(id)).filter(Boolean).join("; ");
-      const classification = (record.fields.Classification ?? []).map((id) => classNames.get(id)).find(Boolean) ?? "";
-      catalogue.set(slug, {
-        slug,
-        title,
-        author,
-        classification,
-        dateAdded: record.fields["Date Added"] ?? record.createdTime.slice(0, 10),
-        subjects: record.fields.Subjects ?? [],
-        language: record.fields.Language ?? "",
-        pages: record.fields.Pages,
-        coverUrl: record.fields["Cover URL"] ?? "",
-      });
+    const snapshot = await readSnapshot(env.LIBRARY_BUCKET);
+    if (!snapshot) {
+      if (strict) throw new Error("Librarium snapshot has not been initialized.");
+      console.warn("Librarium snapshot is missing; serving the limited checked-in catalog.");
+      return FALLBACK_CATALOGUE;
     }
-
-    return catalogue;
+    return new Map(snapshot.publishedBooks.map((book) => [book.slug, book]));
   } catch (error: unknown) {
     console.error(JSON.stringify({
-      message: "Airtable catalogue unavailable; serving the checked-in fallback",
+      message: "R2 catalog snapshot unavailable; serving the limited checked-in fallback",
       error: errorMessage(error),
     }));
     if (strict) throw error;
