@@ -1,0 +1,54 @@
+name: Validate Supabase migration
+
+on:
+  pull_request:
+    paths:
+      - "supabase/**"
+      - "scripts/migrate-airtable-to-supabase.mjs"
+      - ".github/workflows/validate-supabase.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: florilegium
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d florilegium"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate import script syntax
+        run: node --check scripts/migrate-airtable-to-supabase.mjs
+      - name: Create Supabase API roles in isolated test database
+        run: |
+          psql -h localhost -U postgres -d florilegium -v ON_ERROR_STOP=1 \
+            -c "create role anon; create role authenticated; create role service_role bypassrls;"
+      - name: Apply initial SQL migration
+        run: psql -h localhost -U postgres -d florilegium -v ON_ERROR_STOP=1 -f supabase/migrations/20261109000000_librarium_initial.sql
+      - name: Check publication view is guarded
+        run: |
+          psql -h localhost -U postgres -d florilegium -v ON_ERROR_STOP=1 \
+            -c "insert into public.books (title,slug,status) values ('Draft','draft-only','Draft'),('Public','published-only','Published');"
+          psql -h localhost -U postgres -d florilegium -v ON_ERROR_STOP=1 \
+            -c "select * from public.published_books;"
+          result=$(psql -h localhost -U postgres -d florilegium -tA -c "select count(*) from public.published_books;")
+          test "$result" = "1"
+          rls=$(psql -h localhost -U postgres -d florilegium -tA -c "select count(*) from pg_class where relname in ('books','authors','classifications','unpublished','book_authors','book_classifications') and relrowsecurity;")
+          test "$rls" = "6"
