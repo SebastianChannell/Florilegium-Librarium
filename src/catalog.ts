@@ -6,8 +6,8 @@ export interface CatalogBook {
   dateAdded: string;
 }
 
-// Airtable is the canonical catalogue. This checked-in snapshot lets the Worker
-// serve that metadata without exposing an Airtable credential in the browser.
+// Supabase is the canonical catalogue. This checked-in, limited fallback lets
+// the Worker show known titles if the R2 snapshot is unavailable.
 export const BOOK_CATALOG: readonly CatalogBook[] = [
   {
     slug: "ancora-de-salvacion",
