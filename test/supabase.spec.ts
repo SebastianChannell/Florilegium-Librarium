@@ -139,6 +139,6 @@ describe("Supabase to R2 snapshot", () => {
     expect(snapshot.census.draftBooks).toBe(1);
     expect(stored).toHaveLength(1);
     expect(stored[0].key).toBe(CATALOG_SNAPSHOT_KEY);
-    expect(stored[0].value).not.toContain("Unreviewed");
+    expect(JSON.parse(stored[0].value).publishedBooks.map((book: { title: string }) => book.title)).toEqual(["Published title"]);
   });
 });
