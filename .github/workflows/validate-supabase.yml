@@ -41,7 +41,7 @@ jobs:
           psql -h localhost -U postgres -d florilegium -v ON_ERROR_STOP=1 \
             -c "create role anon; create role authenticated; create role service_role bypassrls;"
       - name: Apply initial SQL migration
-        run: psql -h localhost -U postgres -d florilegium -v ON_ERROR_STOP=1 -f supabase/migrations/20261109000000_librarium_initial.sql
+        run: psql -h localhost -U postgres -d florilegium -v ON_ERROR_STOP=1 -f supabase/migrations/20261109192746_librarium_initial.sql
       - name: Check publication view is guarded
         run: |
           psql -h localhost -U postgres -d florilegium -v ON_ERROR_STOP=1 \
