@@ -1,0 +1,30 @@
+name: Migrate Airtable to Supabase (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        type: boolean
+        required: true
+        default: false
+        description: "Write to Supabase after reviewing a successful dry run"
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fetch Airtable data, validate relationships, and optionally import
+        run: node scripts/migrate-airtable-to-supabase.mjs ${{ inputs.apply && '--apply' || '--dry-run' }}
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE_ID: appEBrDjSYL5WYWft
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
