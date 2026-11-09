@@ -8,7 +8,7 @@ The site and Worker use the name **Librarium**.
 
 - Reads the live R2 object list directly through a Worker binding.
 - Includes every `.pdf` object below the configured `pdfs/` prefix.
-- Uses Airtable only for the scheduled R2 import and authenticated manual refresh.
+- Uses Supabase as the canonical metadata database for the daily R2 scan and the authenticated manual import. Normal Librarium/Census page views read R2, not Supabase.
   Both Librarium and Census read the same R2 JSON snapshot for ordinary page visits.
   Only records with `Status = Published` appear in Librarium.
 - Scans `pdfs/` once daily (06:00 UTC). New PDFs become reviewed-publication drafts
@@ -19,7 +19,7 @@ The site and Worker use the name **Librarium**.
 - Uses an Orarium-style slide-out sidebar with expandable main classifications (Liturgia, Theologia, Spiritualia, Preces, Auctores) and instant search by title, author, and subject.
 - Opens a selected title directly in the existing PDF.js reader in a new tab. No covers, grids, or intermediate book-detail pages.
 - Caches the generated API response at the edge for five minutes; cache misses read R2,
-  not Airtable. The sidebar Refresh button becomes available after the initial catalogue loads; it runs a key-protected R2-to-Airtable import (up to five changed PDFs per click) and reloads the visible catalogue immediately. A one-minute cooldown prevents accidental duplicate imports.
+  not Airtable. The sidebar Refresh button becomes available after the initial catalogue loads; it runs a key-protected R2-to-Supabase import (up to five changed PDFs per click) and reloads the visible catalogue immediately. A one-minute cooldown prevents accidental duplicate imports.
 
 ## Current production source
 
@@ -30,7 +30,7 @@ The site and Worker use the name **Librarium**.
 | Public asset origin | `https://assets.sacrumflorilegium.com/` |
 | PDF.js reader | `https://reader.sacrumflorilegium.com/web/viewer.html` |
 
-Every PDF now uses the Airtable slug as its filename:
+Every PDF uses its catalog slug as its filename:
 
 ```text
 pdfs/my-prayer-book.pdf
@@ -57,13 +57,13 @@ published merely because the snapshot is unavailable.
 
 ### Optional title-page assets (not displayed in Librarium)
 
-The **Books → Cover URL** field in Airtable remains available as optional
+The **Books → Cover URL** field in Supabase remains available as optional
 catalogue metadata, and the API continues to expose `coverUrl` for compatibility.
 The Librarium interface deliberately does not display or request these images.
 
 The Cover URL value should point to an actual publicly accessible image.
 A populated URL alone does not guarantee that the R2 object exists.
-Deployments use the Airtable URLs and do not regenerate book covers.
+Deployments use the Supabase catalog URLs and do not regenerate book covers.
 If an image really needs to be created or repaired, `npm run covers` remains
 available as a separate manual maintenance command (requires Cloudflare
 credentials plus `pdftoppm` and `cwebp`).
@@ -73,7 +73,7 @@ credentials plus `pdftoppm` and `cwebp`).
 1. Upload `pdfs/<slug>.pdf` to the `sacrum-assets` R2 bucket.
 2. After the next daily scan, the Worker creates a Books record with `Status = Draft`
    and `Ingest Status = Review Needed`.
-3. Review the flagged fields in Airtable. Confirm the linked Author and
+3. Review the flagged fields in Supabase. Confirm the linked Author and
    Classification, add Subjects, Source, edition information, Original Language,
    OCR, and adjust Cover Page when necessary.
 4. Change `Status` to `Published`. Librarium will include the book after its
@@ -87,13 +87,12 @@ stored as `Content Hash` so unchanged PDFs are not processed twice.
 
 After the catalogue loads, **Import & refresh** appears in the sidebar. On first use, enter the private manual import key. It is held only in memory for the current page session, never in a URL or persistent browser storage. The Worker verifies its SHA-256 digest; the plaintext key is not committed. After the key is accepted, subsequent clicks in the same page session import immediately.
 
-A successful `POST /api/refresh` performs the R2-to-Airtable scan (up to five changed PDFs per request), rebuilds the shared R2 snapshot from Airtable, updates the Worker's five-minute cache, and immediately updates the page. Additional files are reported as deferred and can be imported on a subsequent manual run. A one-minute cooldown discourages accidental repeats. Ordinary visitors cannot initiate imports without the key.
+A successful `POST /api/refresh` performs the R2-to-Supabase scan (up to five changed PDFs per request), rebuilds the shared R2 snapshot from Supabase, updates the Worker's five-minute cache, and immediately updates the page. Additional files are reported as deferred and can be imported on a subsequent manual run. A one-minute cooldown discourages accidental repeats. Ordinary visitors cannot initiate imports without the key.
 
 To rotate the key, generate a new cryptographically random token and replace `MANUAL_REFRESH_KEY_HASH` with its SHA-256 hex digest in `src/index.ts`, then deploy. **Do not put the plaintext key in this repository.**
 
-The monthly Airtable API allowance applies only to the automatic daily import,
-manual imports, and their snapshot rebuilds. Ordinary Librarium and Census visits
-never call Airtable.
+Supabase is contacted only during the daily R2 import, authorized manual refresh,
+and snapshot generation. Ordinary Librarium and Census page visits never contact Supabase.
 
 
 ## Shared snapshot and initial activation
@@ -103,31 +102,51 @@ snapshot at `system/librarium/catalog-snapshot-v1.json` in the existing R2
 bucket. The authorized **Import & refresh** button does the same immediately.
 The snapshot contains published catalog fields, the existing cover-manifest
 fields, and precomputed Census statistics. It does **not** contain all raw
-Airtable records or credentials (important because asset buckets may expose
+Supabase records or credentials (important because asset buckets may expose
 stored objects publicly). The previous snapshot is retained if the import
 or snapshot build fails.
 
-**First activation requires one successful Airtable synchronization.** If
-Airtable's monthly API allowance is exhausted, the snapshot cannot be built.
-Until then Librarium serves the small checked-in catalog and Census reports
-that the snapshot is uninitialized. Once Airtable access resumes, use the
-authorized Import & refresh button, or let the daily cron initialize it.
+**First activation requires a server-only Supabase secret and one successful
+synchronization.** If the secret is not configured, the Worker skips the daily
+import and denies the manual import with HTTP 503. Ordinary site views still use
+R2 (or the limited built-in fallback if a snapshot does not yet exist).
+Once the secret is installed, use the authenticated Import & refresh button,
+or let the daily cron initialize the full snapshot.
 
 Publication remains review-gated: new PDFs are drafts until manually marked
-`Published` in Airtable. R2 PDFs absent from the published snapshot remain
+`Published` in Supabase. R2 PDFs absent from the published snapshot remain
 hidden.
 
-## Airtable access
+## Supabase access — required for the cutover
 
-The Worker requires an Airtable personal access token with read/write access to
-records in the Librarium base for daily/manual synchronization only. Store it as a Cloudflare Worker secret; never add
-it to this repository:
+The imported catalog is in the `Librarium` Supabase project:
+`https://gqqzogtrywuvomzmapgf.supabase.co`.
+
+**Only the server-side Cloudflare Worker has database credentials.** The project
+URL is a non-secret setting in `wrangler.jsonc`. The database key must be
+installed separately in Cloudflare **Worker secrets**:
+
+1. Open [Supabase API Keys](https://supabase.com/dashboard/project/gqqzogtrywuvomzmapgf/settings/api-keys) and create/copy a new **secret key** (starts with `sb_secret_`).
+2. Open Cloudflare dashboard → **Workers & Pages** → `florilegium-librarium` → **Settings** → **Variables and Secrets**, then add **Secret** `SUPABASE_SECRET_KEY` with that value.
+3. Once the secret has been saved, open Librarium and use the existing authorized **Import & refresh** action. It scans R2 (up to five changed PDFs), writes new/changed records into Supabase, and builds the full R2 catalog snapshot.
+
+Equivalent CLI (on a trusted machine with Wrangler authenticated):
 
 ```bash
-npx wrangler secret put AIRTABLE_TOKEN
+npx wrangler secret put SUPABASE_SECRET_KEY
 ```
 
-The base ID and table names are non-secret values in `wrangler.jsonc`.
+**Never commit, paste, or disclose the secret value in GitHub source, client
+code, URLs, logs, or R2 objects.** Do not use a Supabase publishable key for
+database writes: all catalog tables have RLS enabled and no public policies.
+The existing manual refresh key protects the *refresh endpoint* and is distinct
+from the server-side Supabase API key.
+
+The daily trigger remains 06:00 UTC; the existing authorization, refresh
+cooldown, five-minute R2 API cache, publication review, and PDF.js links
+are unchanged. An unsuccessful snapshot rebuild retains the previous R2
+snapshot. Keep Airtable as a historical backup until the Supabase cutover
+has been verified in production.
 
 ## Development
 
