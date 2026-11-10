@@ -8,6 +8,8 @@ const elements = {
   clearSearch: document.getElementById("clear-search"),
   count: document.getElementById("result-count"),
   refresh: document.getElementById("refresh-catalogue"),
+  reseed: document.getElementById("reseed-catalogue"),
+  refreshSubmit: document.getElementById("refresh-auth-submit"),
   refreshForm: document.getElementById("refresh-auth-form"),
   refreshKeyInput: document.getElementById("refresh-key-input"),
   refreshCancel: document.getElementById("refresh-auth-cancel"),
@@ -24,6 +26,7 @@ const state = {
 const expandedGroups = new Set();
 let focusBeforeSidebar = null;
 let manualRefreshKey = "";
+let pendingMaintenanceAction = "import";
 
 function openSidebar(focusSearch = false) {
   if (!document.body.classList.contains("sidebar-open")) {
@@ -189,7 +192,6 @@ async function loadBooks() {
     if (!data || !Array.isArray(data.books)) throw new Error("Invalid catalogue response");
     state.books = data.books.filter(validBook);
     renderIndex();
-    elements.refresh.hidden = false;
   } catch (error) {
     console.error("Could not load Librarium", error);
     elements.count.textContent = "Catalogue unavailable";
@@ -203,17 +205,30 @@ async function loadBooks() {
     retry.addEventListener("click", loadBooks);
     elements.status.append(message, retry);
     elements.status.hidden = false;
+  } finally {
+    // Both controls start disabled in HTML; enable them even if the current
+    // R2 snapshot is unavailable, so Rebuild index can repair the catalog.
+    elements.refresh.hidden = false;
+    elements.refresh.disabled = false;
+    elements.reseed.hidden = false;
+    elements.reseed.disabled = false;
   }
 }
 
-async function runManualImport() {
-  if (!manualRefreshKey || elements.refresh.disabled) return;
+async function runManualImport(action = "import") {
+  if (!manualRefreshKey || elements.refresh.disabled || elements.reseed.disabled) return;
   elements.refresh.disabled = true;
-  elements.refresh.textContent = "Importing…";
-  elements.status.textContent = "Checking R2 and importing changed PDFs into Airtable…";
+  elements.reseed.disabled = true;
+  const reseedOnly = action === "reseed";
+  const actionButton = reseedOnly ? elements.reseed : elements.refresh;
+  actionButton.textContent = reseedOnly ? "Rebuilding…" : "Importing…";
+  elements.status.textContent = reseedOnly
+    ? "Rebuilding the catalog snapshot from Supabase (no PDF scan)…"
+    : "Checking R2 and importing changed PDFs into Supabase…";
   elements.status.hidden = false;
+
   try {
-    const response = await fetch("/api/refresh", {
+    const response = await fetch(reseedOnly ? "/api/reseed" : "/api/refresh", {
       method: "POST",
       headers: { Accept: "application/json", Authorization: "Bearer " + manualRefreshKey },
       cache: "no-store",
@@ -223,46 +238,62 @@ async function runManualImport() {
       manualRefreshKey = "";
       elements.refreshForm.hidden = false;
       elements.refreshKeyInput.focus();
-      throw new Error("Incorrect manual import key. Please try again.");
+      throw new Error(data.error || "Incorrect manual import key. It is not your Supabase secret.");
     }
-    if (!response.ok) throw new Error(data.error || "Import failed (" + response.status + ").");
-    if (!Array.isArray(data.books)) throw new Error("Invalid catalogue response.");
+    if (!response.ok) {
+      const code = data.code ? " [" + data.code + "]" : "";
+      throw new Error((data.error || "Catalog update failed (" + response.status + ").") + code);
+    }
+    if (!Array.isArray(data.books)) throw new Error("Invalid catalog response.");
     state.books = data.books.filter(validBook);
     renderIndex();
-    const imported = data.imported;
-    const changes = imported.created + imported.updated;
-    let message = "Import complete: " + changes + " changed PDF" + (changes === 1 ? "" : "s") +
-      " (" + imported.created + " new, " + imported.updated + " updated). Catalogue refreshed.";
-    if (imported.failed) message += " " + imported.failed + " file(s) failed; review your Worker logs.";
-    if (imported.deferred) message += " " + imported.deferred + " file(s) remain for a later import.";
-    elements.status.textContent = message;
+    if (reseedOnly) {
+      const total = data.snapshot?.publishedBooks ?? state.books.length;
+      elements.status.textContent = "Index rebuilt from Supabase: " + total +
+        " published book" + (total === 1 ? "" : "s") + ".";
+    } else {
+      const imported = data.imported;
+      const changes = imported.created + imported.updated;
+      let message = "Import complete: " + changes + " changed PDF" + (changes === 1 ? "" : "s") +
+        " (" + imported.created + " new, " + imported.updated + " updated). Catalogue refreshed.";
+      if (imported.failed) message += " " + imported.failed + " file(s) failed; review your Worker logs.";
+      if (imported.deferred) message += " " + imported.deferred + " file(s) remain for a later import.";
+      elements.status.textContent = message;
+    }
     elements.status.hidden = false;
   } catch (error) {
-    console.error("Manual Librarium import failed", error);
-    elements.status.textContent = error.message || "Manual import failed. Previous catalogue retained.";
+    console.error("Manual Librarium maintenance failed", error);
+    elements.status.textContent = error.message || "Catalog operation failed. Existing index retained.";
     elements.status.hidden = false;
   } finally {
     elements.refresh.disabled = false;
+    elements.reseed.disabled = false;
     elements.refresh.textContent = "Import & refresh";
+    elements.reseed.textContent = "Rebuild index";
   }
 }
 
-elements.refresh.addEventListener("click", () => {
+function selectMaintenanceAction(action) {
+  pendingMaintenanceAction = action;
   if (!manualRefreshKey) {
+    elements.refreshSubmit.textContent = action === "reseed" ? "Rebuild index" : "Import now";
     elements.refreshForm.hidden = false;
     elements.refreshKeyInput.focus();
     return;
   }
-  void runManualImport();
-});
+  void runManualImport(action);
+}
+
+elements.refresh.addEventListener("click", () => selectMaintenanceAction("import"));
+elements.reseed.addEventListener("click", () => selectMaintenanceAction("reseed"));
 elements.refreshForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const key = elements.refreshKeyInput.value.trim();
   if (!key) return;
-  manualRefreshKey = key; // In-memory only: no localStorage, sessionStorage, or URLs.
+  manualRefreshKey = key; // In-memory only: never write to storage or URLs.
   elements.refreshKeyInput.value = "";
   elements.refreshForm.hidden = true;
-  void runManualImport();
+  void runManualImport(pendingMaintenanceAction);
 });
 elements.refreshCancel.addEventListener("click", () => {
   elements.refreshKeyInput.value = "";
