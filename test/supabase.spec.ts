@@ -108,7 +108,9 @@ describe("Supabase to R2 snapshot", () => {
           book_classifications: [{ classification_id: "c1", sort_order: 0 }],
         },
         { id: "b2", title: "Unreviewed", slug: "unreviewed", status: "Draft",
-          date_added: "2026-09-02", subjects: [], language: "",
+          date_added: "2026-09-02", subjects: ["Unpublished Subject"], language: "Latin",
+          r2_key: "pdfs/unreviewed.pdf", cover_page: 1,
+          cover_url: "https://assets.sacrumflorilegium.com/covers/unreviewed.webp",
           book_authors: [], book_classifications: [] },
       ],
       authors: [{ id: "a1", name: "The Author" }],
@@ -139,6 +141,11 @@ describe("Supabase to R2 snapshot", () => {
     expect(snapshot.census.totalBooks).toBe(2);
     expect(snapshot.census.publishedBooks).toBe(1);
     expect(snapshot.census.draftBooks).toBe(1);
+    expect(snapshot.covers.map((cover) => cover.slug)).toEqual(["published-title"]);
+    expect(snapshot.census.recent.every((book) => book.title !== "Unreviewed")).toBe(true);
+    expect(snapshot.census.topSubjects.every((item) => item.name !== "Unpublished Subject")).toBe(true);
+    expect(JSON.stringify(snapshot)).not.toContain("Unreviewed");
+    expect(JSON.stringify(snapshot)).not.toContain("Unpublished Subject");
     expect(stored).toHaveLength(1);
     expect(stored[0].key).toBe(CATALOG_SNAPSHOT_KEY);
     expect(JSON.parse(stored[0].value).publishedBooks.map((book: { title: string }) => book.title)).toEqual(["Published title"]);
