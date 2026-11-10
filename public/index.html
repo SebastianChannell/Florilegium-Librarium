@@ -61,13 +61,16 @@
 
           <div class="index-toolbar">
             <p id="result-count" class="result-count" aria-live="polite">Loading books…</p>
-            <button id="refresh-catalogue" class="refresh-button" type="button" aria-label="Import new PDFs and refresh catalogue" disabled hidden>Import &amp; refresh</button>
+            <div class="maintenance-actions">
+              <button id="reseed-catalogue" class="refresh-button" type="button" aria-label="Rebuild catalogue from Supabase without scanning PDFs" disabled hidden>Rebuild index</button>
+              <button id="refresh-catalogue" class="refresh-button" type="button" aria-label="Import new PDFs and refresh catalogue" disabled hidden>Import &amp; refresh</button>
+            </div>
           </div>
           <form id="refresh-auth-form" class="refresh-auth" hidden>
-            <label for="refresh-key-input">Manual import key</label>
+            <label for="refresh-key-input">Manual import key (not the Supabase secret)</label>
             <input id="refresh-key-input" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" required>
             <div class="refresh-auth-actions">
-              <button type="submit">Import now</button>
+              <button type="submit" id="refresh-auth-submit">Continue</button>
               <button type="button" id="refresh-auth-cancel">Cancel</button>
             </div>
           </form>
