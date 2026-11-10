@@ -5,12 +5,13 @@ import { ingestLibrary } from "./ingest";
 const API_PATH = "/api/books";
 const COVER_MANIFEST_PATH = "/api/cover-manifest";
 const MANUAL_REFRESH_PATH = "/api/refresh";
+const MANUAL_RESEED_PATH = "/api/reseed";
 // SHA-256 of an independently generated 256-bit manual refresh key. The key itself is never shipped in the repository or browser assets.
 const MANUAL_REFRESH_KEY_HASH = "66deace57b2e4e43ab11d58cf7f29660d0dd97216ed19e69f04d28aa51e9294d";
 const MANUAL_REFRESH_LAST_KEY = "system/librarium/last-manual-refresh";
 const MANUAL_REFRESH_COOLDOWN_MS = 60_000;
 const API_CACHE_SECONDS = 300;
-const API_CACHE_VERSION = "9";
+const API_CACHE_VERSION = "10";
 const PDF_EXTENSION = /\.pdf$/i;
 
 const SMALL_WORDS = new Set([
@@ -106,15 +107,22 @@ export default {
   ): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === MANUAL_REFRESH_PATH) {
+    if (url.pathname === MANUAL_REFRESH_PATH || url.pathname === MANUAL_RESEED_PATH) {
+      const reseedOnly = url.pathname === MANUAL_RESEED_PATH;
       if (request.method !== "POST") {
         return Response.json({ error: "Method not allowed." }, { status: 405, headers: { Allow: "POST", "Cache-Control": "no-store" } });
       }
-      if (!(await hasManualRefreshAccess(request))) {
-        return Response.json({ error: "Invalid refresh key." }, { status: 401, headers: { "Cache-Control": "no-store" } });
+      if (!(await hasManualRefreshAccess(request, env))) {
+        return Response.json({
+          error: "Incorrect manual import key. This is separate from the Supabase secret key.",
+          code: "MANUAL_KEY_INVALID",
+        }, { status: 401, headers: { "Cache-Control": "no-store" } });
       }
       if (!env.SUPABASE_SECRET_KEY) {
-        return Response.json({ error: "Supabase secret is not configured." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+        return Response.json({
+          error: "The Cloudflare Worker is missing the SUPABASE_SECRET_KEY binding.",
+          code: "SUPABASE_SECRET_MISSING",
+        }, { status: 503, headers: { "Cache-Control": "no-store" } });
       }
       try {
         const last = await env.LIBRARY_BUCKET.head(MANUAL_REFRESH_LAST_KEY);
@@ -124,7 +132,10 @@ export default {
             status: 429, headers: { "Cache-Control": "no-store", "Retry-After": String(Math.max(1, retryAfter)) },
           });
         }
-        const imported = await ingestLibrary(env.LIBRARY_BUCKET, env.SUPABASE_SECRET_KEY, {
+        // Snapshot-only rebuild is fast and safe: it never scans or modifies PDFs.
+        const imported = reseedOnly ? {
+          scanned: 0, created: 0, updated: 0, unchanged: 0, failed: 0, deferred: 0,
+        } : await ingestLibrary(env.LIBRARY_BUCKET, env.SUPABASE_SECRET_KEY, {
           prefix: env.R2_PREFIX,
           publicBaseUrl: env.R2_PUBLIC_BASE_URL,
           projectUrl: env.SUPABASE_URL,
@@ -133,7 +144,7 @@ export default {
           classificationsTable: "Classifications",
           maxChangedFilesPerRun: 5,
         });
-        await buildAndSaveSnapshot(env.LIBRARY_BUCKET, env.SUPABASE_SECRET_KEY, {
+        const snapshot = await buildAndSaveSnapshot(env.LIBRARY_BUCKET, env.SUPABASE_SECRET_KEY, {
           projectUrl: env.SUPABASE_URL,
           booksTable: "Books",
           authorsTable: "Authors",
@@ -151,12 +162,25 @@ export default {
         const cacheResponse = Response.json(payload, {
           headers: { "Cache-Control": `public, max-age=60, s-maxage=${API_CACHE_SECONDS}, stale-while-revalidate=86400` },
         });
-        await caches.default.put(new Request(cacheUrl), cacheResponse);
+        try {
+          await caches.default.put(new Request(cacheUrl), cacheResponse);
+        } catch (cacheError) {
+          // The R2 snapshot is already saved. A cache-write failure should not
+          // turn a successful database synchronization into an error response.
+          console.warn("Librarium cache update failed; new snapshot remains saved.", errorMessage(cacheError));
+        }
         await env.LIBRARY_BUCKET.put(MANUAL_REFRESH_LAST_KEY, payload.generatedAt, { httpMetadata: { contentType: "text/plain" } });
-        return Response.json({ ...payload, imported }, { headers: { "Cache-Control": "no-store" } });
+        return Response.json({
+          ...payload, imported, reseedOnly,
+          snapshot: {
+            generatedAt: snapshot.generatedAt,
+            totalBooks: snapshot.census.totalBooks,
+            publishedBooks: snapshot.census.publishedBooks,
+          },
+        }, { headers: { "Cache-Control": "no-store" } });
       } catch (error: unknown) {
         console.error(JSON.stringify({ message: "Manual Librarium import failed", error: errorMessage(error) }));
-        return Response.json({ error: "The import could not be completed. Supabase may be unavailable or not configured." }, {
+        return Response.json(publicRefreshFailure(error), {
           status: 503, headers: { "Cache-Control": "no-store" },
         });
       }
@@ -569,14 +593,41 @@ function responseForRequest(
   });
 }
 
-async function hasManualRefreshAccess(request: Request): Promise<boolean> {
+async function hasManualRefreshAccess(request: Request, env: Env): Promise<boolean> {
   const auth = request.headers.get("Authorization") ?? "";
   if (!auth.startsWith("Bearer ")) return false;
   const key = auth.slice("Bearer ".length);
   if (key.length < 32 || key.length > 128) return false;
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key));
-  const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return hex === MANUAL_REFRESH_KEY_HASH;
+  const hash = new Uint8Array(digest);
+  const expectedHex = env.MANUAL_REFRESH_KEY
+    ? Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(env.MANUAL_REFRESH_KEY))),
+        (byte) => byte.toString(16).padStart(2, "0")).join("")
+    : MANUAL_REFRESH_KEY_HASH;
+  const expectedBytes = new Uint8Array(expectedHex.match(/../g)!.map((byte) => parseInt(byte, 16)));
+  let mismatch = 0;
+  for (let i = 0; i < hash.length; i++) mismatch |= hash[i] ^ expectedBytes[i];
+  return mismatch === 0;
+}
+
+function publicRefreshFailure(error: unknown): { error: string; code: string } {
+  const message = errorMessage(error);
+  if (/Supabase .+ HTTP 40[13]/.test(message)) return {
+    code: "SUPABASE_AUTH_FAILED",
+    error: "Supabase rejected the Worker API key. Verify SUPABASE_SECRET_KEY in Cloudflare.",
+  };
+  if (/Supabase .+ HTTP 404/.test(message)) return {
+    code: "SUPABASE_SCHEMA_ERROR",
+    error: "Supabase catalog tables are unavailable. Check the Worker project URL and database schema.",
+  };
+  if (/Supabase .+ HTTP/.test(message)) return {
+    code: "SUPABASE_API_ERROR",
+    error: "Supabase returned an error. Check the Librarium Worker logs for details.",
+  };
+  return {
+    code: "IMPORT_OR_SNAPSHOT_ERROR",
+    error: "The catalog operation could not finish. Check the Librarium Worker logs for details.",
+  };
 }
 
 function errorMessage(error: unknown): string {
