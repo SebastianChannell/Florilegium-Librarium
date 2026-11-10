@@ -129,8 +129,12 @@ export class CatalogClient {
       const detail = await response.text();
       throw new Error(`Supabase ${table} HTTP ${response.status}: ${detail.slice(0, 320)}`);
     }
+    // PostgREST defaults to return=minimal for inserts into link tables.
+    // A successful 201 (as well as 204) may have no JSON response body.
     if (response.status === 204) return undefined as T;
-    return response.json<T>();
+    const body = await response.text();
+    if (!body.trim()) return undefined as T;
+    return JSON.parse(body) as T;
   }
 
   async list<TFields>(
@@ -194,11 +198,13 @@ export class CatalogClient {
         if (Array.isArray(authors) && authors.length) {
           await this.request("book_authors", "POST", {
             data: authors.map((author_id, sort_order) => ({ book_id: row.id, author_id, sort_order })),
+            prefer: "return=minimal",
           });
         }
         if (Array.isArray(classes) && classes.length) {
           await this.request("book_classifications", "POST", {
             data: classes.map((classification_id, sort_order) => ({ book_id: row.id, classification_id, sort_order })),
+            prefer: "return=minimal",
           });
         }
       } catch (error) {
