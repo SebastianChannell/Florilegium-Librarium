@@ -64,7 +64,9 @@ describe("Supabase catalog adapter", () => {
         return jsonResponse([{ id: "book-new", status: "Published",
           title: "Reviewed", slug: "new", content_hash: "new-hash" }]);
       }
-      return new Response(null, { status: 204 });
+      // Supabase/PostgREST commonly returns 201 with an empty body for
+      // relationship inserts when Prefer: return=minimal is used.
+      return new Response(null, { status: 201 });
     }));
 
     const client = new CatalogClient(SECRET, ROOT);
