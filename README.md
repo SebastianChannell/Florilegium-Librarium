@@ -11,7 +11,7 @@ The site and Worker use the name **Librarium**.
 - Uses Supabase as the canonical metadata database for the daily R2 scan and the authenticated manual import. Normal Librarium/Census page views read R2, not Supabase.
   Both Librarium and Census read the same R2 JSON snapshot for ordinary page visits.
   Only records with `Status = Published` appear in Librarium.
-- Scans `pdfs/` once daily (06:00 UTC). New PDFs become reviewed-publication drafts
+- Scans `pdfs/` once daily (06:00 UTC), processing up to five new or changed PDFs per run. New PDFs become reviewed-publication drafts
   with file data, PDF metadata, page count, searchable-text detection, probable
   language, a suggested title page, and linked author/classification when the
   evidence is sufficiently clear.
@@ -19,7 +19,7 @@ The site and Worker use the name **Librarium**.
 - Uses an Orarium-style slide-out sidebar with expandable main classifications (Liturgia, Theologia, Spiritualia, Preces, Auctores) and instant search by title, author, and subject.
 - Opens a selected title directly in the existing PDF.js reader in a new tab. No covers, grids, or intermediate book-detail pages.
 - Caches the generated API response at the edge for five minutes; cache misses read R2,
-  not Airtable. The sidebar Refresh button becomes available after the initial catalogue loads; it runs a key-protected R2-to-Supabase import (up to five changed PDFs per click) and reloads the visible catalogue immediately. A one-minute cooldown prevents accidental duplicate imports.
+  not Supabase. The sidebar Refresh button becomes available after the initial catalogue loads; it runs a key-protected R2-to-Supabase import (up to five changed PDFs per click) and reloads the visible catalogue immediately. A one-minute cooldown prevents accidental duplicate imports.
 
 ## Current production source
 
@@ -70,14 +70,35 @@ credentials plus `pdftoppm` and `cwebp`).
 
 ## Reviewed publication
 
-1. Upload `pdfs/<slug>.pdf` to the `sacrum-assets` R2 bucket.
-2. After the next daily scan, the Worker creates a Books record with `Status = Draft`
-   and `Ingest Status = Review Needed`.
-3. Review the flagged fields in Supabase. Confirm the linked Author and
-   Classification, add Subjects, Source, edition information, Original Language,
-   OCR, and adjust Cover Page when necessary.
-4. Change `Status` to `Published`. Librarium will include the book after its
-   five-minute catalogue cache expires (usually within five minutes).
+1. Upload `pdfs/<slug>.pdf` into the existing `sacrum-assets` R2 bucket.
+2. The next daily scan (up to five PDFs, at 06:00 UTC) or the private **Import & refresh**
+   button creates a record in **Supabase → Table Editor → books**, with
+   `status = Draft` and `ingest_status = Review Needed`. It does **not**
+   appear in the public Librarium or cover manifest at this stage.
+3. In the [Supabase Books table](https://supabase.com/dashboard/project/gqqzogtrywuvomzmapgf/editor),
+   filter `status = Draft` to find your unpublished review queue. Check the title,
+   authors (via `book_authors` if linked), classification (via
+   `book_classifications`), language, PDF page count, and suggested cover page.
+   Add or correct subjects, publisher, edition year, original language, OCR
+   information, and any other fields you know.
+4. Manually edit the book's `status` value from `Draft` to `Published` in
+   **books**. No automated process changes this status for you.
+5. Use **Rebuild index** in Librarium to publish the newly approved title
+   immediately, or wait until the next daily snapshot generation (plus any
+   short cache delay). Merely changing `status` in Supabase does **not**
+   instantly update the cached R2 catalogue.
+
+The old `unpublished` table was an archival placeholder from Airtable's
+separate export. **New unpublished books live in `books` with status `Draft`**,
+not in that legacy table. This keeps publication as a single explicit review
+action.
+
+Metadata extraction is best-effort: the Worker reads PDF metadata and up to
+six pages for titles, author, page count, rough language, searchable-text
+detection, and a suggested cover page. Files above 25 MB or unreadable PDFs
+still get a Draft record with basic file metadata and an explanation in
+`ingest_message`. Inferred bibliographic information must be checked; a
+suggested `cover_url` is not a generated image.
 
 Replacing a PDF at the same R2 key refreshes its file-derived fields without
 overwriting curated bibliographic metadata or a Published status. The R2 ETag is
@@ -97,13 +118,15 @@ and snapshot generation. Ordinary Librarium and Census page visits never contact
 
 ## Shared snapshot and initial activation
 
-The daily 06:00 UTC cron scans R2 for new/changed PDFs, then publishes a fresh
+The daily 06:00 UTC cron processes up to five new/changed R2 PDFs, then publishes a fresh
 snapshot at `system/librarium/catalog-snapshot-v1.json` in the existing R2
 bucket. The authorized **Import & refresh** button does the same immediately.
-The snapshot contains published catalog fields, the existing cover-manifest
-fields, and precomputed Census statistics. It does **not** contain all raw
-Supabase records or credentials (important because asset buckets may expose
-stored objects publicly). The previous snapshot is retained if the import
+The snapshot contains **published-only** book and cover-manifest entries,
+plus precomputed Census statistics. Draft book titles, cover paths, authors,
+subjects, and recent-book descriptions are not exposed (only aggregate draft
+counts and generic review-completeness indicators). It does **not** contain
+all raw Supabase records or credentials (important because asset buckets may
+expose stored objects publicly). The previous snapshot is retained if the import
 or snapshot build fails.
 
 **First activation requires a server-only Supabase secret and one successful

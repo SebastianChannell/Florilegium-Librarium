@@ -93,16 +93,21 @@ function calculateCensusStats(
   const authorMap = new Map(authorsRaw.map((r) => [r.id, asText(r.fields.Name) || r.id]));
   const classMap = new Map(classesRaw.map((r) => [r.id, asText(r.fields.Class) || r.id]));
   const books = booksRaw.map((r) => ({ id: r.id, ...r.fields }));
+  // Aggregate public charts from reviewed books only. A newly imported draft
+  // must not leak its title, author or subjects into Census or the public R2 JSON.
+  const published = books.filter((b) => b.Status === "Published");
   const linked = (value: unknown, map: Map<string, string>) =>
     textList(value).map((id) => map.get(id) || id).filter(Boolean);
-  const classifications = countBy(books.map((b) => linked(b.Classification, classMap)));
-  const subjects = countBy(books.map((b) => textList(b.Subjects)));
-  const languages = countBy(books.map((b) => [asText(b.Language)].filter(Boolean)));
-  const authors = countBy(books.map((b) => linked(b.Authors, authorMap)));
+  const classifications = countBy(published.map((b) => linked(b.Classification, classMap)));
+  const subjects = countBy(published.map((b) => textList(b.Subjects)));
+  const languages = countBy(published.map((b) => [asText(b.Language)].filter(Boolean)));
+  const authors = countBy(published.map((b) => linked(b.Authors, authorMap)));
   const complete = (name: string, test: (book: (typeof books)[number]) => boolean) => {
     const missing = books
       .filter((b) => !test(b))
-      .map((b) => asText(b.Title) || "Untitled")
+      .map((b) => b.Status === "Published"
+        ? (asText(b.Title) || "Untitled")
+        : "Unpublished book")
       .sort((a, b) => a.localeCompare(b));
     const n = books.length - missing.length;
     return {
@@ -134,7 +139,7 @@ function calculateCensusStats(
       complete("Edition year", (b) => !!b["Edition Year"]),
       complete("Publisher", (b) => !!b.Publisher),
     ],
-    recent: books
+    recent: published
       .slice()
       .sort((a, b) =>
         asText(b["Date Added"]).localeCompare(asText(a["Date Added"])) ||
@@ -186,9 +191,10 @@ export async function buildAndSaveSnapshot(
     }];
   });
 
-  // The cover manifest exposes only the fields the existing endpoint already returned.
+  // The cover manifest is publicly accessible: never reveal draft titles or PDFs.
   const covers: CoverManifestEntry[] = books.flatMap((record) => {
     const f = record.fields;
+    if (f.Status !== "Published") return [];
     const slug = asText(f.Slug);
     const pdfKey = asText(f["R2 Key"]);
     const coverUrl = asText(f["Cover URL"]);

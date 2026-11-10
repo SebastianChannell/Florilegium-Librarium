@@ -4,7 +4,8 @@ import { CatalogClient } from "./catalog-db";
 const PDF_EXTENSION = /\.pdf$/i;
 const MAX_INSPECTION_BYTES = 25 * 1024 * 1024;
 const MAX_INSPECTION_PAGES = 6;
-const MAX_CHANGED_FILES_PER_RUN = 1;
+// Daily automatic and manual scans may process up to five changed PDFs per run.
+const MAX_CHANGED_FILES_PER_RUN = 5;
 const SMALL_WORDS = new Set(["a", "an", "and", "at", "by", "for", "from", "in", "of", "on", "or", "the", "to", "with"]);
 
 interface IngestConfig {
