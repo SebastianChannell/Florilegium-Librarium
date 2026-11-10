@@ -8,7 +8,7 @@
     "types": "wrangler types --include-runtime false",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run types && npm run typecheck && npm test && wrangler deploy --dry-run",
+    "check": "node --check public/app.js && npm run types && npm run typecheck && npm test && wrangler deploy --dry-run",
     "deploy": "wrangler deploy",
     "covers": "node scripts/generate-covers.mjs"
   },
