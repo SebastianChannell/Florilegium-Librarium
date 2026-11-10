@@ -128,7 +128,7 @@ installed separately in Cloudflare **Worker secrets**:
 
 1. Open [Supabase API Keys](https://supabase.com/dashboard/project/gqqzogtrywuvomzmapgf/settings/api-keys) and create/copy a new **secret key** (starts with `sb_secret_`).
 2. Open Cloudflare dashboard → **Workers & Pages** → `florilegium-librarium` → **Settings** → **Variables and Secrets**, then add **Secret** `SUPABASE_SECRET_KEY` with that value.
-3. Once the secret has been saved, open Librarium and use the existing authorized **Import & refresh** action. It scans R2 (up to five changed PDFs), writes new/changed records into Supabase, and builds the full R2 catalog snapshot.
+3. Once the secret is saved, open Librarium. Use **Rebuild index** to create the shared R2 snapshot directly from the imported Supabase books without scanning any PDF; use **Import & refresh** to check R2 for up to five changed PDFs, update the database, then rebuild the snapshot. Both buttons require a *separate manual import key*.
 
 Equivalent CLI (on a trusted machine with Wrangler authenticated):
 
@@ -141,6 +141,36 @@ code, URLs, logs, or R2 objects.** Do not use a Supabase publishable key for
 database writes: all catalog tables have RLS enabled and no public policies.
 The existing manual refresh key protects the *refresh endpoint* and is distinct
 from the server-side Supabase API key.
+
+### Repairing a disabled or unauthorized import button
+
+The **Import & refresh** and **Rebuild index** buttons are enabled after the
+site loads. Even if the initial catalog cannot be read, both controls remain
+available so a broken or missing snapshot can be repaired.
+
+The **manual import key** entered in the iPhone interface is **not** the
+Supabase `sb_secret_...` key. The original manual key is still supported.
+If you no longer have it, create your own 32–128 character random password,
+save it privately, and add it to the **same** Cloudflare Worker under
+**Settings → Variables and Secrets** as another **Secret** named
+`MANUAL_REFRESH_KEY`. The new key replaces the old manual key as the
+accepted login for both maintenance buttons. Do not enter the Supabase
+secret into the Librarium website.
+
+There are two different authorized maintenance actions:
+
+- `POST /api/reseed` rebuilds the JSON snapshot using Supabase only. It is
+  designed for recovery from an unavailable or stale R2 index and does not
+  inspect or import any PDFs.
+- `POST /api/refresh` checks the R2 PDF files, imports up to five changed
+  PDFs into Supabase (without touching curated publication metadata), then
+  rebuilds the same snapshot.
+
+Both require a valid manual key, have the same one-minute cooldown, and
+return structured error codes. A Supabase key or schema error shows a specific
+non-sensitive message on screen and the Worker logs contain detailed errors.
+A missing Cloudflare `SUPABASE_SECRET_KEY` produces
+`SUPABASE_SECRET_MISSING`. Existing R2 content is never discarded on failure.
 
 The daily trigger remains 06:00 UTC; the existing authorization, refresh
 cooldown, five-minute R2 API cache, publication review, and PDF.js links
