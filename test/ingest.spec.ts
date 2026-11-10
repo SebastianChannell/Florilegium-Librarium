@@ -84,7 +84,7 @@ function setup() {
           created_at: "2026-11-10T15:00:00Z",
           book_authors: [],
           book_classifications: [],
-        } as BookRow;
+} as unknown as BookRow;
         books.push(row);
         return Response.json([row], { status: 201 });
       }
