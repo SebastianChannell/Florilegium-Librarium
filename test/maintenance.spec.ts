@@ -110,13 +110,21 @@ describe("Authenticated catalog maintenance", () => {
     const refresh = await handler.fetch(new Request("https://example.test/api/refresh", {
       method: "POST", headers: auth,
     }), env, ctx);
-    expect(refresh.status).toBe(200);
+    expect(refresh.status).toBe(202);
     const body = await refresh.json<{
-      imported: { scanned: number; previouslyKnown: number; unchanged: number; created: number };
+      queued: boolean;
+      job: { id: string; status: string; active: boolean; created: number };
     }>();
-    expect(body.imported).toMatchObject({
-      scanned: 1, previouslyKnown: 1, unchanged: 1, created: 0,
+    expect(body.queued).toBe(true);
+    expect(body.job).toMatchObject({
+      status: "queued", active: true, created: 0,
     });
+    const progress = await handler.fetch(new Request("https://example.test/api/import-status", {
+      method: "GET", headers: auth,
+    }), env, ctx);
+    expect(progress.status).toBe(200);
+    const progressBody = await progress.json<{ job: { id: string } }>();
+    expect(progressBody.job.id).toBe(body.job.id);
   });
 
   it("rebuilds published catalog from Supabase without PDF ingestion", async () => {
