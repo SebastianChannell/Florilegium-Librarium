@@ -138,7 +138,11 @@ describe("New R2 PDF -> Supabase draft -> explicit publication", () => {
     const { bucket, books, posts, objects } = setup();
     const summary = await ingestLibrary(bucket, SECRET, config);
 
-    expect(summary).toMatchObject({ scanned: 1, created: 1, updated: 0, failed: 0 });
+    expect(summary).toMatchObject({
+      scanned: 1, previouslyKnown: 0, newCandidates: 1,
+      created: 1, updated: 0, failed: 0, deferred: 0,
+      failures: [], deferredKeys: [],
+    });
     expect(books).toHaveLength(1);
     expect(books[0]).toMatchObject({
       title: "The Parish Catechism",
@@ -169,6 +173,28 @@ describe("New R2 PDF -> Supabase draft -> explicit publication", () => {
     expect(JSON.stringify(snapshot)).not.toContain("The Parish Catechism");
   });
 
+  it("reports PDFs deferred by the per-run inspection limit", async () => {
+    const { bucket, objects } = setup();
+    objects.push({
+      key: "pdfs/second-new-book.pdf",
+      size: 150,
+      etag: "second-file-etag",
+      uploaded: new Date("2026-11-10T15:05:00Z"),
+    });
+    const summary = await ingestLibrary(bucket, SECRET, {
+      ...config,
+      maxChangedFilesPerRun: 1,
+    });
+    expect(summary).toMatchObject({
+      scanned: 2,
+      newCandidates: 2,
+      created: 1,
+      deferred: 1,
+      deferredKeys: ["pdfs/second-new-book.pdf"],
+      failed: 0,
+    });
+  });
+
   it("only publishes after manual Status change, and never overwrites reviewed metadata", async () => {
     const { bucket, books, objects } = setup();
     await ingestLibrary(bucket, SECRET, config);
@@ -192,7 +218,10 @@ describe("New R2 PDF -> Supabase draft -> explicit publication", () => {
     // nor the owner's chosen title and cover.
     objects[0].etag = "new-r2-etag";
     const update = await ingestLibrary(bucket, SECRET, config);
-    expect(update).toMatchObject({ created: 0, updated: 1, failed: 0 });
+    expect(update).toMatchObject({
+      scanned: 1, previouslyKnown: 1, newCandidates: 0,
+      created: 0, updated: 1, failed: 0,
+    });
     expect(books[0]).toMatchObject({
       status: "Published",
       title: "Reviewed Catechism",
