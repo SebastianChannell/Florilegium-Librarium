@@ -104,6 +104,35 @@ Replacing a PDF at the same R2 key refreshes its file-derived fields without
 overwriting curated bibliographic metadata or a Published status. The R2 ETag is
 stored as `Content Hash` so unchanged PDFs are not processed twice.
 
+## Troubleshooting new R2 uploads
+
+Upload to the **sacrum-assets** bucket with a key such as
+`pdfs/my-new-title.pdf`. The import scans only the `pdfs/` prefix and keys
+ending in `.pdf` (case-insensitive). `covers/`, the R2 bucket root, and
+unrelated folders are not scanned.
+
+**R2 uploads do not trigger imports immediately.** The automatic scan runs
+at 06:00 UTC each day (1:00 AM US Eastern in standard time, 2:00 AM
+during daylight saving time). To import sooner, use **Import & refresh**
+in the Librarium sidebar, with the original manual key from your password
+manager. **Rebuild index** only refreshes the snapshot from existing Supabase
+records; it does not import new R2 files.
+
+An authenticated import displays how many PDF objects it detected in R2,
+how many new candidates were absent from Supabase, and how many became
+`Draft` records, were updated, were deferred, or failed. Failure summaries
+include safe error categories and the R2 key; complete diagnostics remain in
+Cloudflare Worker logs. The import checks up to **five changed PDFs** per run.
+Further changed PDFs are deferred, and another import can be run after the
+one-minute *import* cooldown. **Rebuild index has a separate cooldown** and
+never blocks a genuine PDF import.
+
+After creating drafts, check
+[Supabase books](https://supabase.com/dashboard/project/gqqzogtrywuvomzmapgf/editor)
+and filter by `status = Draft`. New records are not added to the public
+catalog, even when the import succeeds. Manually set `status = Published`
+after reviewing the metadata; then use **Rebuild index**.
+
 ## Owner-authorized manual import
 
 After the catalogue loads, **Import & refresh** appears in the sidebar. On first use, enter the private manual import key. It is held only in memory for the current page session, never in a URL or persistent browser storage. The Worker verifies its SHA-256 digest; the plaintext key is not committed. After the key is accepted, subsequent clicks in the same page session import immediately.
