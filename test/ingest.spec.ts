@@ -80,7 +80,7 @@ function setup() {
         const fields = body as Record<string, unknown>;
         const row = {
           ...fields,
-          id: "book-1",
+          id: "book-" + (books.length + 1),
           created_at: "2026-11-10T15:00:00Z",
           book_authors: [],
           book_classifications: [],
@@ -171,6 +171,28 @@ describe("New R2 PDF -> Supabase draft -> explicit publication", () => {
     expect(snapshot.census).toMatchObject({ totalBooks: 1, publishedBooks: 0, draftBooks: 1 });
     expect(snapshot.census.recent).toHaveLength(0);
     expect(JSON.stringify(snapshot)).not.toContain("The Parish Catechism");
+  });
+
+  it("imports two different R2 keys whose normalized filename slugs collide, without overwriting the first", async () => {
+    const { bucket, books, objects } = setup();
+    objects.push({
+      key: "pdfs/the_parish_catechism.pdf",
+      size: 321,
+      etag: "second-r2-file-etag",
+      uploaded: new Date("2026-11-10T15:01:00Z"),
+    });
+    const report = await ingestLibrary(bucket, SECRET, config);
+    expect(report).toMatchObject({ scanned: 2, newCandidates: 2, created: 2, updated: 0, failed: 0 });
+    expect(books).toHaveLength(2);
+    expect(books.map((book) => book.r2_key).sort()).toEqual([
+      "pdfs/the-parish-catechism.pdf",
+      "pdfs/the_parish_catechism.pdf",
+    ]);
+    expect(books[0].slug).toBe("the-parish-catechism");
+    expect(books[1].slug).toMatch(/^the-parish-catechism-[0-9a-f]{10}$/);
+    expect(books.every((book) => book.status === "Draft")).toBe(true);
+    const rerun = await ingestLibrary(bucket, SECRET, config);
+    expect(rerun).toMatchObject({ scanned: 2, created: 0, updated: 0, unchanged: 2 });
   });
 
   it("reports PDFs deferred by the per-run inspection limit", async () => {
