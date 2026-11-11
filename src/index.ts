@@ -1,18 +1,18 @@
 import { BOOKS_BY_SLUG } from "./catalog";
 import { buildAndSaveSnapshot, readSnapshot } from "./snapshot";
-import { ingestLibrary } from "./ingest";
+import { getImportJob, processImportBatch, startImportJob } from "./import-queue";
 
 const API_PATH = "/api/books";
 const COVER_MANIFEST_PATH = "/api/cover-manifest";
 const MANUAL_REFRESH_PATH = "/api/refresh";
+const IMPORT_STATUS_PATH = "/api/import-status";
 const MANUAL_RESEED_PATH = "/api/reseed";
 // SHA-256 of an independently generated 256-bit manual refresh key. The key itself is never shipped in the repository or browser assets.
 const MANUAL_REFRESH_KEY_HASH = "66deace57b2e4e43ab11d58cf7f29660d0dd97216ed19e69f04d28aa51e9294d";
-const MANUAL_REFRESH_LAST_KEY = "system/librarium/last-manual-refresh";
 const MANUAL_RESEED_LAST_KEY = "system/librarium/last-manual-reseed";
 const MANUAL_REFRESH_COOLDOWN_MS = 60_000;
 const API_CACHE_SECONDS = 300;
-const API_CACHE_VERSION = "10";
+const API_CACHE_VERSION = "11";
 const PDF_EXTENSION = /\.pdf$/i;
 
 const SMALL_WORDS = new Set([
@@ -108,6 +108,29 @@ export default {
   ): Promise<Response> {
     const url = new URL(request.url);
 
+    if (url.pathname === IMPORT_STATUS_PATH) {
+      if (request.method !== "GET") {
+        return Response.json({ error: "Method not allowed." }, {
+          status: 405, headers: { Allow: "GET", "Cache-Control": "no-store" },
+        });
+      }
+      if (!(await hasManualRefreshAccess(request, env))) {
+        return Response.json({ error: "Invalid manual import key.", code: "MANUAL_KEY_INVALID" }, {
+          status: 401, headers: { "Cache-Control": "no-store" },
+        });
+      }
+      try {
+        return Response.json({ job: await getImportJob(env.LIBRARY_BUCKET) }, {
+          headers: { "Cache-Control": "no-store" },
+        });
+      } catch (error) {
+        console.error("Could not read Librarium import progress:", errorMessage(error));
+        return Response.json({ error: "Could not retrieve import progress." }, {
+          status: 503, headers: { "Cache-Control": "no-store" },
+        });
+      }
+    }
+
     if (url.pathname === MANUAL_REFRESH_PATH || url.pathname === MANUAL_RESEED_PATH) {
       const reseedOnly = url.pathname === MANUAL_RESEED_PATH;
       if (request.method !== "POST") {
@@ -125,28 +148,31 @@ export default {
           code: "SUPABASE_SECRET_MISSING",
         }, { status: 503, headers: { "Cache-Control": "no-store" } });
       }
+      if (!reseedOnly) {
+        try {
+          const job = await startImportJob(env.LIBRARY_BUCKET, "manual");
+          return Response.json({ queued: true, job }, {
+            status: 202, headers: { "Cache-Control": "no-store" },
+          });
+        } catch (error) {
+          console.error("Could not start Librarium import:", errorMessage(error));
+          return Response.json({ error: "Could not start the import queue.", code: "QUEUE_START_FAILED" }, {
+            status: 503, headers: { "Cache-Control": "no-store" },
+          });
+        }
+      }
       try {
-        // A catalog-only rebuild must not prevent a genuine R2 PDF import.
-        const cooldownKey = reseedOnly ? MANUAL_RESEED_LAST_KEY : MANUAL_REFRESH_LAST_KEY;
-        const last = await env.LIBRARY_BUCKET.head(cooldownKey);
+        const last = await env.LIBRARY_BUCKET.head(MANUAL_RESEED_LAST_KEY);
         if (last && Date.now() - last.uploaded.getTime() < MANUAL_REFRESH_COOLDOWN_MS) {
           const retryAfter = Math.ceil((MANUAL_REFRESH_COOLDOWN_MS - (Date.now() - last.uploaded.getTime())) / 1000);
           return Response.json({ error: "A manual import just completed. Try again in a minute." }, {
             status: 429, headers: { "Cache-Control": "no-store", "Retry-After": String(Math.max(1, retryAfter)) },
           });
         }
-        // Snapshot-only rebuild is fast and safe: it never scans or modifies PDFs.
-        const imported = reseedOnly ? {
+        // Snapshot-only rebuild never scans or modifies PDFs.
+        const imported = {
           scanned: 0, created: 0, updated: 0, unchanged: 0, failed: 0, deferred: 0,
-        } : await ingestLibrary(env.LIBRARY_BUCKET, env.SUPABASE_SECRET_KEY, {
-          prefix: env.R2_PREFIX,
-          publicBaseUrl: env.R2_PUBLIC_BASE_URL,
-          projectUrl: env.SUPABASE_URL,
-          booksTable: "Books",
-          authorsTable: "Authors",
-          classificationsTable: "Classifications",
-          maxChangedFilesPerRun: 5,
-        });
+        };
         const snapshot = await buildAndSaveSnapshot(env.LIBRARY_BUCKET, env.SUPABASE_SECRET_KEY, {
           projectUrl: env.SUPABASE_URL,
           booksTable: "Books",
@@ -172,7 +198,7 @@ export default {
           // turn a successful database synchronization into an error response.
           console.warn("Librarium cache update failed; new snapshot remains saved.", errorMessage(cacheError));
         }
-        await env.LIBRARY_BUCKET.put(cooldownKey, payload.generatedAt, { httpMetadata: { contentType: "text/plain" } });
+        await env.LIBRARY_BUCKET.put(MANUAL_RESEED_LAST_KEY, payload.generatedAt, { httpMetadata: { contentType: "text/plain" } });
         return Response.json({
           ...payload, imported, reseedOnly,
           snapshot: {
@@ -304,33 +330,27 @@ export default {
     }
   },
 
-  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    if (!env.SUPABASE_SECRET_KEY) {
-      console.error("Librarium ingest skipped: SUPABASE_SECRET_KEY is not configured.");
-      return;
-    }
-
-    ctx.waitUntil(
-      ingestLibrary(env.LIBRARY_BUCKET, env.SUPABASE_SECRET_KEY, {
-        prefix: env.R2_PREFIX,
-        publicBaseUrl: env.R2_PUBLIC_BASE_URL,
-        projectUrl: env.SUPABASE_URL,
-        booksTable: "Books",
-        authorsTable: "Authors",
-        classificationsTable: "Classifications",
-      }).then(async (summary) => {
-        console.log(JSON.stringify({ message: "Librarium ingest completed", ...summary }));
-        const snapshot = await buildAndSaveSnapshot(env.LIBRARY_BUCKET, env.SUPABASE_SECRET_KEY!, {
-          projectUrl: env.SUPABASE_URL,
-          booksTable: "Books",
-          authorsTable: "Authors",
-          classificationsTable: "Classifications",
-        });
-        console.log(JSON.stringify({ message: "Librarium snapshot updated", generatedAt: snapshot.generatedAt }));
-      }).catch((error: unknown) => {
-        console.error(JSON.stringify({ message: "Librarium daily ingest/snapshot failed; retaining last good snapshot", error: errorMessage(error) }));
-      }),
-    );
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil((async () => {
+      try {
+        // Daily discovery starts a durable import job. The every-minute trigger
+        // resumes queued work until finished, even after the browser closes.
+        if (controller.cron === "0 6 * * *") {
+          if (!env.SUPABASE_SECRET_KEY) {
+            console.error("Daily R2 import skipped: SUPABASE_SECRET_KEY is missing.");
+            return;
+          }
+          await startImportJob(env.LIBRARY_BUCKET, "daily");
+        }
+        await processImportBatch(env);
+      } catch (error) {
+        console.error(JSON.stringify({
+          message: "Librarium scheduled import failed",
+          error: errorMessage(error),
+        }));
+        throw error;
+      }
+    })());
   },
 } satisfies ExportedHandler<Env>;
 
