@@ -9,6 +9,7 @@ const MANUAL_RESEED_PATH = "/api/reseed";
 // SHA-256 of an independently generated 256-bit manual refresh key. The key itself is never shipped in the repository or browser assets.
 const MANUAL_REFRESH_KEY_HASH = "66deace57b2e4e43ab11d58cf7f29660d0dd97216ed19e69f04d28aa51e9294d";
 const MANUAL_REFRESH_LAST_KEY = "system/librarium/last-manual-refresh";
+const MANUAL_RESEED_LAST_KEY = "system/librarium/last-manual-reseed";
 const MANUAL_REFRESH_COOLDOWN_MS = 60_000;
 const API_CACHE_SECONDS = 300;
 const API_CACHE_VERSION = "10";
@@ -125,7 +126,9 @@ export default {
         }, { status: 503, headers: { "Cache-Control": "no-store" } });
       }
       try {
-        const last = await env.LIBRARY_BUCKET.head(MANUAL_REFRESH_LAST_KEY);
+        // A catalog-only rebuild must not prevent a genuine R2 PDF import.
+        const cooldownKey = reseedOnly ? MANUAL_RESEED_LAST_KEY : MANUAL_REFRESH_LAST_KEY;
+        const last = await env.LIBRARY_BUCKET.head(cooldownKey);
         if (last && Date.now() - last.uploaded.getTime() < MANUAL_REFRESH_COOLDOWN_MS) {
           const retryAfter = Math.ceil((MANUAL_REFRESH_COOLDOWN_MS - (Date.now() - last.uploaded.getTime())) / 1000);
           return Response.json({ error: "A manual import just completed. Try again in a minute." }, {
@@ -169,7 +172,7 @@ export default {
           // turn a successful database synchronization into an error response.
           console.warn("Librarium cache update failed; new snapshot remains saved.", errorMessage(cacheError));
         }
-        await env.LIBRARY_BUCKET.put(MANUAL_REFRESH_LAST_KEY, payload.generatedAt, { httpMetadata: { contentType: "text/plain" } });
+        await env.LIBRARY_BUCKET.put(cooldownKey, payload.generatedAt, { httpMetadata: { contentType: "text/plain" } });
         return Response.json({
           ...payload, imported, reseedOnly,
           snapshot: {
