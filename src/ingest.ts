@@ -32,12 +32,20 @@ interface NamedFields {
 }
 
 export interface IngestSummary {
+  /** Number of PDF objects found under the configured R2 prefix. */
   scanned: number;
+  /** Number of books Supabase contained at the start of the scan. */
+  previouslyKnown: number;
+  /** New R2 PDFs missing from Supabase when scanning began. */
+  newCandidates: number;
   created: number;
   updated: number;
   unchanged: number;
   failed: number;
   deferred: number;
+  /** Visible only in the authenticated maintenance response, never the public catalog. */
+  failures: Array<{ key: string; reason: string }>;
+  deferredKeys: string[];
 }
 
 export async function ingestLibrary(
@@ -80,11 +88,18 @@ export async function ingestLibrary(
 
   const summary: IngestSummary = {
     scanned: objects.length,
+    previouslyKnown: books.length,
+    newCandidates: objects.filter((object) => {
+      const slug = slugFromKey(object.key);
+      return !bookByKey.has(object.key) && !bookBySlug.has(slug);
+    }).length,
     created: 0,
     updated: 0,
     unchanged: 0,
     failed: 0,
     deferred: 0,
+    failures: [],
+    deferredKeys: [],
   };
 
   let changedFilesProcessed = 0;
@@ -102,6 +117,7 @@ export async function ingestLibrary(
 
     if (changedFilesProcessed >= (config.maxChangedFilesPerRun ?? MAX_CHANGED_FILES_PER_RUN)) {
       summary.deferred += 1;
+      if (summary.deferredKeys.length < 12) summary.deferredKeys.push(object.key);
       continue;
     }
     changedFilesProcessed += 1;
@@ -146,12 +162,30 @@ export async function ingestLibrary(
     } catch (error: unknown) {
       summary.failed += 1;
       const message = error instanceof Error ? error.message : String(error);
-      if (existing) {
-        await catalog.update(config.booksTable, existing.id, {
-          "Ingest Status": "Failed",
-          "Ingest Message": message.slice(0, 5000),
-          "Last Ingested": new Date().toISOString(),
+      if (summary.failures.length < 12) {
+        // Avoid including sensitive credentials or internal response bodies in UI.
+        const reason = /Supabase .* HTTP (\d{3})/.exec(message);
+        summary.failures.push({
+          key: object.key,
+          reason: reason ? `Supabase rejected the write (HTTP ${reason[1]})` :
+            /does not exist|disappeared/i.test(message) ? "PDF disappeared from R2 while scanning" :
+            "PDF import failed; see Cloudflare Worker logs",
         });
+      }
+      if (existing) {
+        try {
+          await catalog.update(config.booksTable, existing.id, {
+            "Ingest Status": "Failed",
+            "Ingest Message": message.slice(0, 5000),
+            "Last Ingested": new Date().toISOString(),
+          });
+        } catch (reportError) {
+          console.error(JSON.stringify({
+            message: "Could not write ingest failure status",
+            key: object.key,
+            error: reportError instanceof Error ? reportError.message : String(reportError),
+          }));
+        }
       }
       console.error(JSON.stringify({ message: "PDF ingest failed", key: object.key, error: message }));
     }

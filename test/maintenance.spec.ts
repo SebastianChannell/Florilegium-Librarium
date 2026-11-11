@@ -10,7 +10,9 @@ function envFixture(withSecret = true) {
   const snapshotStore = new Map<string, string>();
   let objectGetCount = 0;
   const bucket = {
-    async head() { return null; },
+    async head(key: string) {
+      return snapshotStore.has(key) ? { uploaded: new Date() } : null;
+    },
     async put(key: string, value: string) {
       snapshotStore.set(key, value);
       return {} as R2Object;
@@ -56,7 +58,7 @@ function restStub() {
       rows = [{
         id: "book-one", title: "Test Book", slug: "test-book",
         status: "Published", date_added: "2026-11-01",
-        r2_key: "pdfs/test-book.pdf", pages: 3, subjects: [],
+        r2_key: "pdfs/test-book.pdf", content_hash: "etag", pages: 3, subjects: [],
         book_authors: [{ author_id: "a1", sort_order: 0 }],
         book_classifications: [{ classification_id: "c1", sort_order: 0 }],
       }];
@@ -91,6 +93,30 @@ describe("Authenticated catalog maintenance", () => {
     const body = await resp.json<{ code: string; error: string }>();
     expect(body.code).toBe("SUPABASE_SECRET_MISSING");
     expect(body.error).not.toContain(DB_KEY);
+  });
+
+  it("allows a real PDF import immediately after Rebuild index", async () => {
+    const { env } = envFixture();
+    restStub();
+    const auth = { Authorization: "Bearer " + MANUAL_KEY };
+    const ctx = { waitUntil() {} } as unknown as ExecutionContext;
+    const reseed = await handler.fetch(new Request("https://example.test/api/reseed", {
+      method: "POST", headers: auth,
+    }), env, ctx);
+    expect(reseed.status).toBe(200);
+
+    // A successful reseed writes a cooldown timestamp, but it must not
+    // suppress the next R2 import by returning HTTP 429.
+    const refresh = await handler.fetch(new Request("https://example.test/api/refresh", {
+      method: "POST", headers: auth,
+    }), env, ctx);
+    expect(refresh.status).toBe(200);
+    const body = await refresh.json<{
+      imported: { scanned: number; previouslyKnown: number; unchanged: number; created: number };
+    }>();
+    expect(body.imported).toMatchObject({
+      scanned: 1, previouslyKnown: 1, unchanged: 1, created: 0,
+    });
   });
 
   it("rebuilds published catalog from Supabase without PDF ingestion", async () => {
