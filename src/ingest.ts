@@ -4,7 +4,7 @@ import { CatalogClient } from "./catalog-db";
 const PDF_EXTENSION = /\.pdf$/i;
 const MAX_INSPECTION_BYTES = 25 * 1024 * 1024;
 const MAX_INSPECTION_PAGES = 6;
-// Daily automatic and manual scans may process up to five changed PDFs per run.
+// Limit work per Worker invocation; the persistent queue resumes remaining PDFs.
 const MAX_CHANGED_FILES_PER_RUN = 5;
 const SMALL_WORDS = new Set(["a", "an", "and", "at", "by", "for", "from", "in", "of", "on", "or", "the", "to", "with"]);
 
@@ -16,6 +16,8 @@ interface IngestConfig {
   authorsTable: string;
   classificationsTable: string;
   maxChangedFilesPerRun?: number;
+  /** Failed object versions already attempted during the current durable job. */
+  skipFailureIds?: string[];
 }
 
 interface BookFields {
@@ -43,8 +45,9 @@ export interface IngestSummary {
   unchanged: number;
   failed: number;
   deferred: number;
-  /** Visible only in the authenticated maintenance response, never the public catalog. */
-  failures: Array<{ key: string; reason: string }>;
+  skippedFailures: number;
+  /** Failure IDs are hashes of object keys and ETags, safe to checkpoint without raw draft filenames. */
+  failures: Array<{ key: string; reason: string; fingerprintId: string }>;
   deferredKeys: string[];
 }
 
@@ -98,11 +101,13 @@ export async function ingestLibrary(
     unchanged: 0,
     failed: 0,
     deferred: 0,
+    skippedFailures: 0,
     failures: [],
     deferredKeys: [],
   };
 
   let changedFilesProcessed = 0;
+  const skipped = new Set(config.skipFailureIds ?? []);
 
   // Sequential processing bounds PDF inspection and Supabase writes.
   for (const object of objects) {
@@ -112,6 +117,10 @@ export async function ingestLibrary(
 
     if (existing?.fields["Content Hash"] === fingerprint) {
       summary.unchanged += 1;
+      continue;
+    }
+    if (skipped.size > 0 && skipped.has(await failureId(object.key, fingerprint))) {
+      summary.skippedFailures += 1;
       continue;
     }
 
@@ -167,6 +176,7 @@ export async function ingestLibrary(
         const reason = /Supabase .* HTTP (\d{3})/.exec(message);
         summary.failures.push({
           key: object.key,
+          fingerprintId: await failureId(object.key, fingerprint),
           reason: reason ? `Supabase rejected the write (HTTP ${reason[1]})` :
             /does not exist|disappeared/i.test(message) ? "PDF disappeared from R2 while scanning" :
             "PDF import failed; see Cloudflare Worker logs",
@@ -416,4 +426,11 @@ async function listPdfObjects(bucket: R2Bucket, prefix: string): Promise<R2Objec
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
   return objects;
+}
+
+/** Stable, non-reversible identifier for one R2 object version. */
+async function failureId(key: string, fingerprint: string): Promise<string> {
+  const bytes = new TextEncoder().encode(key + "\\0" + fingerprint);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
