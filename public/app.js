@@ -253,11 +253,34 @@ async function runManualImport(action = "import") {
         " published book" + (total === 1 ? "" : "s") + ".";
     } else {
       const imported = data.imported;
-      const changes = imported.created + imported.updated;
-      let message = "Import complete: " + changes + " changed PDF" + (changes === 1 ? "" : "s") +
-        " (" + imported.created + " new, " + imported.updated + " updated). Catalogue refreshed.";
-      if (imported.failed) message += " " + imported.failed + " file(s) failed; review your Worker logs.";
-      if (imported.deferred) message += " " + imported.deferred + " file(s) remain for a later import.";
+      let message = "Scanned " + imported.scanned + " PDF" +
+        (imported.scanned === 1 ? "" : "s") + " in R2/pdfs/. " +
+        imported.created + " new Draft" + (imported.created === 1 ? "" : "s") +
+        " created in Supabase, " + imported.updated + " updated, " +
+        imported.unchanged + " unchanged.";
+      if (imported.created > 0) {
+        message += " Review new books in Supabase → books → status = Draft. " +
+          "They will NOT appear publicly until you mark them Published.";
+      }
+      if (imported.failed > 0) {
+        message += " " + imported.failed + " FAILED.";
+        if (Array.isArray(imported.failures)) {
+          message += " " + imported.failures.map(item =>
+            item.key + ": " + item.reason).join("; ") + ".";
+        }
+      }
+      if (imported.deferred > 0) {
+        message += " " + imported.deferred + " deferred (five changed PDFs per run).";
+        if (Array.isArray(imported.deferredKeys) && imported.deferredKeys.length) {
+          message += " Next: " + imported.deferredKeys.slice(0, 5).join(", ") + ".";
+        }
+        message += " Run Import & refresh again after the one-minute cooldown.";
+      }
+      if (imported.scanned === 0) {
+        message += " No PDFs found: verify the R2 object keys begin with pdfs/ and end with .pdf.";
+      } else if (!imported.created && !imported.updated && !imported.failed && !imported.deferred) {
+        message += " No new PDF imports were needed. If an upload is missing, check its R2 key is under pdfs/ with a .pdf extension.";
+      }
       elements.status.textContent = message;
     }
     elements.status.hidden = false;
