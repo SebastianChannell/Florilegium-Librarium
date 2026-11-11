@@ -11,7 +11,7 @@ The site and Worker use the name **Librarium**.
 - Uses Supabase as the canonical metadata database for the daily R2 scan and the authenticated manual import. Normal Librarium/Census page views read R2, not Supabase.
   Both Librarium and Census read the same R2 JSON snapshot for ordinary page visits.
   Only records with `Status = Published` appear in Librarium.
-- Scans `pdfs/` once daily (06:00 UTC), processing up to five new or changed PDFs per run. New PDFs become reviewed-publication drafts
+- Starts a daily import at 06:00 UTC and automatically resumes pending work every minute. New PDFs become reviewed-publication drafts
   with file data, PDF metadata, page count, searchable-text detection, probable
   language, a suggested title page, and linked author/classification when the
   evidence is sufficiently clear.
@@ -19,7 +19,7 @@ The site and Worker use the name **Librarium**.
 - Uses an Orarium-style slide-out sidebar with expandable main classifications (Liturgia, Theologia, Spiritualia, Preces, Auctores) and instant search by title, author, and subject.
 - Opens a selected title directly in the existing PDF.js reader in a new tab. No covers, grids, or intermediate book-detail pages.
 - Caches the generated API response at the edge for five minutes; cache misses read R2,
-  not Supabase. The sidebar Refresh button becomes available after the initial catalogue loads; it runs a key-protected R2-to-Supabase import (up to five changed PDFs per click) and reloads the visible catalogue immediately. A one-minute cooldown prevents accidental duplicate imports.
+  not Supabase. The sidebar Refresh button becomes available after the initial catalogue loads; it starts a single persistent R2-to-Supabase import queue. Cloudflare continues in bounded batches even when the browser closes.
 
 ## Current production source
 
@@ -71,7 +71,7 @@ credentials plus `pdftoppm` and `cwebp`).
 ## Reviewed publication
 
 1. Upload `pdfs/<slug>.pdf` into the existing `sacrum-assets` R2 bucket.
-2. The next daily scan (up to five PDFs, at 06:00 UTC) or the private **Import & refresh**
+2. The daily import (starting at 06:00 UTC) or the private **Import & refresh**
    button creates a record in **Supabase → Table Editor → books**, with
    `status = Draft` and `ingest_status = Review Needed`. It does **not**
    appear in the public Librarium or cover manifest at this stage.
@@ -104,52 +104,64 @@ Replacing a PDF at the same R2 key refreshes its file-derived fields without
 overwriting curated bibliographic metadata or a Published status. The R2 ETag is
 stored as `Content Hash` so unchanged PDFs are not processed twice.
 
-## Troubleshooting new R2 uploads
+## Automatic, resumable R2 import queue
 
-Upload to the **sacrum-assets** bucket with a key such as
-`pdfs/my-new-title.pdf`. The import scans only the `pdfs/` prefix and keys
-ending in `.pdf` (case-insensitive). `covers/`, the R2 bucket root, and
-unrelated folders are not scanned.
+Uploading a PDF to R2 **does not trigger immediate processing**.
+The daily 06:00 UTC trigger starts the import; **Import & refresh** queues one
+on demand. Its server response is HTTP 202 with the job ID. The browser polls
+`GET /api/import-status` (authenticated with the existing manual key)
+to show progress.
 
-**R2 uploads do not trigger imports immediately.** The automatic scan runs
-at 06:00 UTC each day (1:00 AM US Eastern in standard time, 2:00 AM
-during daylight saving time). To import sooner, use **Import & refresh**
-in the Librarium sidebar, with the original manual key from your password
-manager. **Rebuild index** only refreshes the snapshot from existing Supabase
-records; it does not import new R2 files.
+A second scheduled trigger runs **once per minute**. While a queue is active,
+it processes a small batch of up to **two changed PDFs per invocation** and
+checkpoints progress at `system/librarium/import-queue-v1.json` in R2.
+This is a *safety limit per Worker execution*, not a limit on the total number
+of PDFs the job imports. The queue resumes automatically until no changed
+PDFs remain; do not keep pressing the button. If the browser closes, scheduled
+processing continues independently.
 
-An authenticated import displays how many PDF objects it detected in R2,
-how many new candidates were absent from Supabase, and how many became
-`Draft` records, were updated, were deferred, or failed. Failure summaries
-include safe error categories and the R2 key; complete diagnostics remain in
-Cloudflare Worker logs. The import checks up to **five changed PDFs** per run.
-Further changed PDFs are deferred, and another import can be run after the
-one-minute *import* cooldown. **Rebuild index has a separate cooldown** and
-never blocks a genuine PDF import.
+The state record uses conditional R2 ETag writes and an expiration lease to
+avoid concurrent Workers processing the same batch, and is resumable after a
+failed invocation. Failed object versions are checkpointed by hashes instead
+of exposing unpublished filenames in the state JSON. One problematic PDF
+cannot permanently block the others. Three consecutive fatal batch failures
+pause the job with an error; press **Import & refresh** again after checking
+the Worker logs to start a new attempt. Individual failed PDFs are logged
+and automatically retried by the next *new* import job, not repeatedly in
+the same run.
 
-After creating drafts, check
-[Supabase books](https://supabase.com/dashboard/project/gqqzogtrywuvomzmapgf/editor)
-and filter by `status = Draft`. New records are not added to the public
-catalog, even when the import succeeds. Manually set `status = Published`
-after reviewing the metadata; then use **Rebuild index**.
+The job only completes after rebuilding the published-only R2 snapshot.
+A manual **Rebuild index** remains a separate action, does not scan PDFs, and
+does not interfere with ongoing import work. Publishing still requires manual
+review in Supabase (`books.status = Published`).
+
+For missing files, verify they are in bucket `sacrum-assets` with a flat
+key such as `pdfs/my-new-title.pdf`: the importer scans only keys with
+prefix `pdfs/` and suffix `.pdf` (case-insensitive). Files uploaded to the
+bucket root or `covers/` will not be discovered.
 
 ## Owner-authorized manual import
 
-After the catalogue loads, **Import & refresh** appears in the sidebar. On first use, enter the private manual import key. It is held only in memory for the current page session, never in a URL or persistent browser storage. The Worker verifies its SHA-256 digest; the plaintext key is not committed. After the key is accepted, subsequent clicks in the same page session import immediately.
+In Librarium's sidebar, choose **Import & refresh** and enter the private
+manual import key from your password manager. It stays in memory for that
+page session, not in a URL or persistent browser storage. The key protects
+`POST /api/refresh` and `GET /api/import-status` and is **separate** from the
+Supabase `SUPABASE_SECRET_KEY` installed only on the Cloudflare Worker.
 
-A successful `POST /api/refresh` performs the R2-to-Supabase scan (up to five changed PDFs per request), rebuilds the shared R2 snapshot from Supabase, updates the Worker's five-minute cache, and immediately updates the page. Additional files are reported as deferred and can be imported on a subsequent manual run. A one-minute cooldown discourages accidental repeats. Ordinary visitors cannot initiate imports without the key.
-
-To rotate the key, generate a new cryptographically random token and replace `MANUAL_REFRESH_KEY_HASH` with its SHA-256 hex digest in `src/index.ts`, then deploy. **Do not put the plaintext key in this repository.**
-
-Supabase is contacted only during the daily R2 import, authorized manual refresh,
-and snapshot generation. Ordinary Librarium and Census page visits never contact Supabase.
-
+Repeated button presses while a job is active simply join the existing
+queue; no extra work is scheduled. The progress display includes the number
+of drafts created, existing records updated, outstanding files, and failures.
+New titles do not enter the public website until you mark them `Published`
+and the R2 snapshot is updated. To rotate the original manual key, set the
+optional `MANUAL_REFRESH_KEY` **Worker secret** to a long random password;
+never put the plaintext key in GitHub.
 
 ## Shared snapshot and initial activation
 
-The daily 06:00 UTC cron processes up to five new/changed R2 PDFs, then publishes a fresh
-snapshot at `system/librarium/catalog-snapshot-v1.json` in the existing R2
-bucket. The authorized **Import & refresh** button does the same immediately.
+The daily 06:00 UTC trigger starts the persistent import job; the minutely
+trigger continues it until drained, then rebuilds the snapshot at
+`system/librarium/catalog-snapshot-v1.json` in the existing R2 bucket.
+The authorized **Import & refresh** button starts the same workflow on demand.
 The snapshot contains **published-only** book and cover-manifest entries,
 plus precomputed Census statistics. Draft book titles, cover paths, authors,
 subjects, and recent-book descriptions are not exposed (only aggregate draft
@@ -180,7 +192,7 @@ installed separately in Cloudflare **Worker secrets**:
 
 1. Open [Supabase API Keys](https://supabase.com/dashboard/project/gqqzogtrywuvomzmapgf/settings/api-keys) and create/copy a new **secret key** (starts with `sb_secret_`).
 2. Open Cloudflare dashboard → **Workers & Pages** → `florilegium-librarium` → **Settings** → **Variables and Secrets**, then add **Secret** `SUPABASE_SECRET_KEY` with that value.
-3. Once the secret is saved, open Librarium. Use **Rebuild index** to create the shared R2 snapshot directly from the imported Supabase books without scanning any PDF; use **Import & refresh** to check R2 for up to five changed PDFs, update the database, then rebuild the snapshot. Both buttons require a *separate manual import key*.
+3. Once the secret is saved, open Librarium. Use **Rebuild index** to rebuild the public R2 snapshot directly from already-published Supabase books, or **Import & refresh** to queue all outstanding R2 PDFs for automatic background processing. Both require the separate manual import key.
 
 Equivalent CLI (on a trusted machine with Wrangler authenticated):
 
@@ -214,19 +226,19 @@ There are two different authorized maintenance actions:
 - `POST /api/reseed` rebuilds the JSON snapshot using Supabase only. It is
   designed for recovery from an unavailable or stale R2 index and does not
   inspect or import any PDFs.
-- `POST /api/refresh` checks the R2 PDF files, imports up to five changed
-  PDFs into Supabase (without touching curated publication metadata), then
-  rebuilds the same snapshot.
+- `POST /api/refresh` starts or joins the existing import queue. The minutely
+  scheduled Worker drains it automatically in safe batches, preserving all
+  reviewed publication metadata. `GET /api/import-status` reads progress.
 
-Both require a valid manual key, have the same one-minute cooldown, and
-return structured error codes. A Supabase key or schema error shows a specific
+Both require a valid manual key and return structured error codes.
+Rebuild index has a one-minute cooldown; an active import job is idempotent. A Supabase key or schema error shows a specific
 non-sensitive message on screen and the Worker logs contain detailed errors.
 A missing Cloudflare `SUPABASE_SECRET_KEY` produces
 `SUPABASE_SECRET_MISSING`. Existing R2 content is never discarded on failure.
 
-The daily trigger remains 06:00 UTC; the existing authorization, refresh
-cooldown, five-minute R2 API cache, publication review, and PDF.js links
-are unchanged. An unsuccessful snapshot rebuild retains the previous R2
+The daily trigger remains at 06:00 UTC with a minutely continuation trigger;
+the existing authorization, five-minute R2 API cache, publication review,
+and PDF.js links are unchanged. An unsuccessful snapshot rebuild retains the previous R2
 snapshot. Keep Airtable as a historical backup until the Supabase cutover
 has been verified in production.
 
