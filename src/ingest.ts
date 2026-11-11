@@ -92,10 +92,9 @@ export async function ingestLibrary(
   const summary: IngestSummary = {
     scanned: objects.length,
     previouslyKnown: books.length,
-    newCandidates: objects.filter((object) => {
-      const slug = slugFromKey(object.key);
-      return !bookByKey.has(object.key) && !bookBySlug.has(slug);
-    }).length,
+    // Exact R2 keys are authoritative. A normalized filename collision does
+    // not mean the second R2 object is already represented in Supabase.
+    newCandidates: objects.filter((object) => !bookByKey.has(object.key)).length,
     created: 0,
     updated: 0,
     unchanged: 0,
@@ -111,8 +110,16 @@ export async function ingestLibrary(
 
   // Sequential processing bounds PDF inspection and Supabase writes.
   for (const object of objects) {
-    const slug = slugFromKey(object.key);
-    const existing = bookByKey.get(object.key) ?? bookBySlug.get(slug);
+    const existing = bookByKey.get(object.key);
+    const baseSlug = slugFromKey(object.key);
+    // Two distinct R2 objects can normalize to the same slug (for example,
+    // spaces vs hyphens). Never overwrite an existing book's R2 path merely
+    // because the normalized filename matches. Give the additional PDF a
+    // deterministic, distinct draft slug for manual review.
+    const slug = existing?.fields.Slug ??
+      (bookBySlug.has(baseSlug)
+        ? await collisionSlug(baseSlug, object.key, bookBySlug)
+        : baseSlug);
     const fingerprint = object.etag || `${object.size}:${object.uploaded.toISOString()}`;
 
     if (existing?.fields["Content Hash"] === fingerprint) {
@@ -165,8 +172,12 @@ export async function ingestLibrary(
         await catalog.update(config.booksTable, existing.id, safeFields);
         summary.updated += 1;
       } else {
-        await catalog.create(config.booksTable, fields);
+        const created = await catalog.create(config.booksTable, fields);
         summary.created += 1;
+        // The current scan may contain several new colliding filenames.
+        // Reserve this key/slug immediately to prevent duplicate creations.
+        bookByKey.set(object.key, created as (typeof books)[number]);
+        bookBySlug.set(slug, created as (typeof books)[number]);
       }
     } catch (error: unknown) {
       summary.failed += 1;
@@ -402,7 +413,7 @@ function normalize(value: string): string {
     .trim();
 }
 
-function slugFromKey(key: string): string {
+export function slugFromKey(key: string): string {
   const filename = key.split("/").at(-1) ?? key;
   return filename.replace(PDF_EXTENSION, "").toLocaleLowerCase("en-US").replace(/[_\s]+/g, "-");
 }
@@ -417,7 +428,7 @@ function titleFromObjectKey(key: string): string {
   }).join(" ") || "Untitled Book";
 }
 
-async function listPdfObjects(bucket: R2Bucket, prefix: string): Promise<R2Object[]> {
+export async function listPdfObjects(bucket: R2Bucket, prefix: string): Promise<R2Object[]> {
   const objects: R2Object[] = [];
   let cursor: string | undefined;
   do {
@@ -433,4 +444,20 @@ async function failureId(key: string, fingerprint: string): Promise<string> {
   const bytes = new TextEncoder().encode(key + "\\0" + fingerprint);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/** A stable suffix for distinct R2 filenames with the same normalised slug. */
+async function collisionSlug(
+  base: string,
+  key: string,
+  existing: Map<string, unknown>,
+): Promise<string> {
+  const bytes = new TextEncoder().encode(key);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  const hex = Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("");
+  for (let length = 10; length <= hex.length; length += 2) {
+    const candidate = `${base}-${hex.slice(0, length)}`;
+    if (!existing.has(candidate)) return candidate;
+  }
+  throw new Error("Could not create a unique slug for this R2 PDF.");
 }
