@@ -1,11 +1,13 @@
 import { BOOKS_BY_SLUG } from "./catalog";
 import { buildAndSaveSnapshot, readSnapshot } from "./snapshot";
 import { getImportJob, processImportBatch, startImportJob } from "./import-queue";
+import { auditR2Catalog } from "./import-audit";
 
 const API_PATH = "/api/books";
 const COVER_MANIFEST_PATH = "/api/cover-manifest";
 const MANUAL_REFRESH_PATH = "/api/refresh";
 const IMPORT_STATUS_PATH = "/api/import-status";
+const IMPORT_AUDIT_PATH = "/api/import-audit";
 const MANUAL_RESEED_PATH = "/api/reseed";
 // SHA-256 of an independently generated 256-bit manual refresh key. The key itself is never shipped in the repository or browser assets.
 const MANUAL_REFRESH_KEY_HASH = "66deace57b2e4e43ab11d58cf7f29660d0dd97216ed19e69f04d28aa51e9294d";
@@ -107,6 +109,38 @@ export default {
     ctx: ExecutionContext,
   ): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === IMPORT_AUDIT_PATH) {
+      if (request.method !== "GET") {
+        return Response.json({ error: "Method not allowed." }, {
+          status: 405, headers: { Allow: "GET", "Cache-Control": "no-store" },
+        });
+      }
+      if (!(await hasManualRefreshAccess(request, env))) {
+        return Response.json({ error: "Invalid manual import key.", code: "MANUAL_KEY_INVALID" }, {
+          status: 401, headers: { "Cache-Control": "no-store" },
+        });
+      }
+      if (!env.SUPABASE_SECRET_KEY) {
+        return Response.json({ error: "Supabase Worker key is not configured." }, {
+          status: 503, headers: { "Cache-Control": "no-store" },
+        });
+      }
+      try {
+        const report = await auditR2Catalog(
+          env.LIBRARY_BUCKET,
+          env.SUPABASE_SECRET_KEY,
+          env.SUPABASE_URL,
+          env.R2_PREFIX,
+        );
+        return Response.json({ report }, { headers: { "Cache-Control": "no-store" } });
+      } catch (error) {
+        console.error("R2/Supabase reconciliation failed:", errorMessage(error));
+        return Response.json({
+          error: "Could not compare R2 with Supabase. Check Cloudflare Worker logs.",
+        }, { status: 503, headers: { "Cache-Control": "no-store" } });
+      }
+    }
 
     if (url.pathname === IMPORT_STATUS_PATH) {
       if (request.method !== "GET") {

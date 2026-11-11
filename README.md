@@ -104,6 +104,25 @@ Replacing a PDF at the same R2 key refreshes its file-derived fields without
 overwriting curated bibliographic metadata or a Published status. The R2 ETag is
 stored as `Content Hash` so unchanged PDFs are not processed twice.
 
+## Verify R2 against Supabase
+
+Use **Check R2** in Librarium's sidebar, with the same private manual
+import key used for Import & refresh. It calls `GET /api/import-audit`
+which compares the exact R2 PDF object keys under `pdfs/` with Supabase
+`books.r2_key` values. The report includes scanned PDF counts, names of
+files missing from Supabase, and Supabase keys absent from R2.
+The endpoint is authenticated and `Cache-Control: no-store`: unpublished
+PDF filenames are **never** exposed through the public catalogue.
+
+This is a read-only check. A mismatch may mean the import queue is still
+running, the R2 PDF isn't under `pdfs/`, or a filename was normalized to
+the slug of an existing book. **Filename collisions are now handled safely:**
+every distinct R2 object key is a distinct book. When two filenames differ
+only by spaces versus hyphens or underscores and would otherwise have
+identical slugs, the additional PDF is imported as a separate `Draft`
+with a deterministic hash suffix. Never overwrite the original published
+book's R2 key merely because its normalized slug matches.
+
 ## Automatic, resumable R2 import queue
 
 Uploading a PDF to R2 **does not trigger immediate processing**.

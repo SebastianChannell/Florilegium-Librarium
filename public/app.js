@@ -9,6 +9,7 @@ const elements = {
   count: document.getElementById("result-count"),
   refresh: document.getElementById("refresh-catalogue"),
   reseed: document.getElementById("reseed-catalogue"),
+  audit: document.getElementById("audit-catalogue"),
   refreshSubmit: document.getElementById("refresh-auth-submit"),
   refreshForm: document.getElementById("refresh-auth-form"),
   refreshKeyInput: document.getElementById("refresh-key-input"),
@@ -213,6 +214,8 @@ async function loadBooks() {
     elements.refresh.disabled = false;
     elements.reseed.hidden = false;
     elements.reseed.disabled = false;
+    elements.audit.hidden = false;
+    elements.audit.disabled = false;
   }
 }
 
@@ -338,19 +341,81 @@ async function runManualImport(action = "import") {
   }
 }
 
+async function runImportAudit() {
+  if (!manualRefreshKey || elements.audit.disabled) return;
+  elements.audit.disabled = true;
+  elements.audit.textContent = "Checking…";
+  elements.status.textContent = "Comparing R2 PDF keys with Supabase book records…";
+  elements.status.hidden = false;
+
+  try {
+    const response = await fetch("/api/import-audit", {
+      headers: { Accept: "application/json", Authorization: "Bearer " + manualRefreshKey },
+      cache: "no-store",
+    });
+    const data = await response.json();
+    if (response.status === 401) {
+      manualRefreshKey = "";
+      elements.refreshForm.hidden = false;
+      elements.refreshKeyInput.focus();
+      throw new Error("Incorrect manual import key.");
+    }
+    if (!response.ok) throw new Error(data.error || "R2 comparison failed (" + response.status + ").");
+    const report = data.report;
+    if (!report || !Array.isArray(report.missingFromSupabase) ||
+        !Array.isArray(report.missingFromR2)) throw new Error("Invalid R2 comparison response.");
+
+    let message = "R2/Supabase comparison: " + report.r2PdfCount +
+      " PDF files found in R2/pdfs/, " + report.supabaseBookCount +
+      " Supabase records, " + report.matchingKeys + " exact key matches.";
+    if (report.missingFromSupabase.length) {
+      message += " Missing from Supabase (" + report.missingFromSupabase.length + "): " +
+        report.missingFromSupabase.map(item =>
+          item.key + (item.collidesWithSlug
+            ? " [filename collides with existing slug " + item.collidesWithSlug + "]"
+            : "")
+        ).join("; ") + ".";
+      message += " Press Import & refresh to queue these as unpublished Drafts.";
+    }
+    if (report.missingFromR2.length) {
+      message += " Supabase records without a matching R2 PDF (" +
+        report.missingFromR2.length + "): " +
+        report.missingFromR2.map(item => item.key).join("; ") + ".";
+    }
+    if (!report.missingFromSupabase.length && !report.missingFromR2.length) {
+      message += " All scanned R2 PDFs match Supabase exactly.";
+    }
+    if (report.r2PdfCount < report.supabaseBookCount &&
+        !report.missingFromR2.length) {
+      message += " If you expect additional PDFs, check they are under pdfs/ with a .pdf extension.";
+    }
+    elements.status.textContent = message;
+  } catch (error) {
+    console.error("Private R2 inventory comparison failed", error);
+    elements.status.textContent = error.message || "R2 comparison failed.";
+  } finally {
+    elements.audit.textContent = "Check R2";
+    elements.audit.disabled = false;
+    elements.status.hidden = false;
+  }
+}
+
 function selectMaintenanceAction(action) {
   pendingMaintenanceAction = action;
   if (!manualRefreshKey) {
-    elements.refreshSubmit.textContent = action === "reseed" ? "Rebuild index" : "Import now";
+    elements.refreshSubmit.textContent = action === "reseed" ? "Rebuild index" :
+      action === "audit" ? "Check R2" : "Import now";
     elements.refreshForm.hidden = false;
     elements.refreshKeyInput.focus();
     return;
   }
-  void runManualImport(action);
+  if (action === "audit") void runImportAudit();
+  else void runManualImport(action);
 }
 
 elements.refresh.addEventListener("click", () => selectMaintenanceAction("import"));
 elements.reseed.addEventListener("click", () => selectMaintenanceAction("reseed"));
+elements.audit.addEventListener("click", () => selectMaintenanceAction("audit"));
 elements.refreshForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const key = elements.refreshKeyInput.value.trim();
@@ -358,7 +423,8 @@ elements.refreshForm.addEventListener("submit", (event) => {
   manualRefreshKey = key; // In-memory only: never write to storage or URLs.
   elements.refreshKeyInput.value = "";
   elements.refreshForm.hidden = true;
-  void runManualImport(pendingMaintenanceAction);
+  if (pendingMaintenanceAction === "audit") void runImportAudit();
+  else void runManualImport(pendingMaintenanceAction);
 });
 elements.refreshCancel.addEventListener("click", () => {
   elements.refreshKeyInput.value = "";
