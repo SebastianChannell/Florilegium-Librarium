@@ -27,6 +27,7 @@ const expandedGroups = new Set();
 let focusBeforeSidebar = null;
 let manualRefreshKey = "";
 let pendingMaintenanceAction = "import";
+let importPollTimer = null;
 
 function openSidebar(focusSearch = false) {
   if (!document.body.classList.contains("sidebar-open")) {
@@ -215,16 +216,80 @@ async function loadBooks() {
   }
 }
 
+function importProgressText(job) {
+  if (!job) return "No import job has been started.";
+  const counts = job.created + " new Draft" + (job.created === 1 ? "" : "s") +
+    ", " + job.updated + " updated, " + job.failed + " failed.";
+  if (job.status === "queued") {
+    return "Import queued. " + counts + " " +
+      (job.pending > 0 ? job.pending + " still outstanding. " : "") +
+      "Cloudflare will continue automatically; this page may be closed.";
+  }
+  if (job.status === "running") {
+    return "Import running. " + counts + " " +
+      "Scanned " + job.scanned + " R2 PDFs. Processing continues automatically.";
+  }
+  if (job.status === "complete") {
+    return "Import finished: " + counts +
+      (job.failed ? " Some PDFs could not be imported; check the Worker logs." : "") +
+      " New titles remain Draft in Supabase until manually published.";
+  }
+  return "Import stopped: " + (job.lastError || "Review the Cloudflare Worker logs.") +
+    " " + counts + " Select Import & refresh to retry.";
+}
+
+function cancelImportPolling() {
+  if (importPollTimer !== null) clearTimeout(importPollTimer);
+  importPollTimer = null;
+}
+
+async function pollImportStatus() {
+  if (!manualRefreshKey) {
+    cancelImportPolling();
+    return;
+  }
+  try {
+    const response = await fetch("/api/import-status", {
+      headers: { Accept: "application/json", Authorization: "Bearer " + manualRefreshKey },
+      cache: "no-store",
+    });
+    if (response.status === 401) {
+      manualRefreshKey = "";
+      cancelImportPolling();
+      elements.status.textContent = "Manual import key is no longer accepted.";
+      return;
+    }
+    if (!response.ok) throw new Error("Could not retrieve import progress (" + response.status + ").");
+    const data = await response.json();
+    elements.status.textContent = importProgressText(data.job);
+    elements.status.hidden = false;
+    if (!data.job?.active) {
+      cancelImportPolling();
+      if (data.job?.status === "complete") {
+        await loadBooks();
+        elements.status.textContent = importProgressText(data.job);
+        elements.status.hidden = false;
+      }
+      return;
+    }
+  } catch (error) {
+    elements.status.textContent = "Import is running independently. Progress check failed: " +
+      (error.message || "Unavailable") + ".";
+    elements.status.hidden = false;
+  }
+  importPollTimer = setTimeout(() => { void pollImportStatus(); }, 12000);
+}
+
 async function runManualImport(action = "import") {
   if (!manualRefreshKey || elements.refresh.disabled || elements.reseed.disabled) return;
   elements.refresh.disabled = true;
   elements.reseed.disabled = true;
   const reseedOnly = action === "reseed";
   const actionButton = reseedOnly ? elements.reseed : elements.refresh;
-  actionButton.textContent = reseedOnly ? "Rebuilding…" : "Importing…";
+  actionButton.textContent = reseedOnly ? "Rebuilding…" : "Queueing…";
   elements.status.textContent = reseedOnly
     ? "Rebuilding the catalog snapshot from Supabase (no PDF scan)…"
-    : "Checking R2 and importing changed PDFs into Supabase…";
+    : "Starting automatic R2 import queue…";
   elements.status.hidden = false;
 
   try {
@@ -236,6 +301,7 @@ async function runManualImport(action = "import") {
     const data = await response.json();
     if (response.status === 401) {
       manualRefreshKey = "";
+      cancelImportPolling();
       elements.refreshForm.hidden = false;
       elements.refreshKeyInput.focus();
       throw new Error(data.error || "Incorrect manual import key. It is not your Supabase secret.");
@@ -244,44 +310,20 @@ async function runManualImport(action = "import") {
       const code = data.code ? " [" + data.code + "]" : "";
       throw new Error((data.error || "Catalog update failed (" + response.status + ").") + code);
     }
-    if (!Array.isArray(data.books)) throw new Error("Invalid catalog response.");
-    state.books = data.books.filter(validBook);
-    renderIndex();
-    if (reseedOnly) {
+    if (!reseedOnly) {
+      if (!data.job?.active && data.job?.status !== "complete") {
+        throw new Error("The Worker did not confirm the queued import.");
+      }
+      elements.status.textContent = importProgressText(data.job);
+      cancelImportPolling();
+      importPollTimer = setTimeout(() => { void pollImportStatus(); }, 12000);
+    } else {
+      if (!Array.isArray(data.books)) throw new Error("Invalid catalog response.");
+      state.books = data.books.filter(validBook);
+      renderIndex();
       const total = data.snapshot?.publishedBooks ?? state.books.length;
       elements.status.textContent = "Index rebuilt from Supabase: " + total +
         " published book" + (total === 1 ? "" : "s") + ".";
-    } else {
-      const imported = data.imported;
-      let message = "Scanned " + imported.scanned + " PDF" +
-        (imported.scanned === 1 ? "" : "s") + " in R2/pdfs/. " +
-        imported.created + " new Draft" + (imported.created === 1 ? "" : "s") +
-        " created in Supabase, " + imported.updated + " updated, " +
-        imported.unchanged + " unchanged.";
-      if (imported.created > 0) {
-        message += " Review new books in Supabase → books → status = Draft. " +
-          "They will NOT appear publicly until you mark them Published.";
-      }
-      if (imported.failed > 0) {
-        message += " " + imported.failed + " FAILED.";
-        if (Array.isArray(imported.failures)) {
-          message += " " + imported.failures.map(item =>
-            item.key + ": " + item.reason).join("; ") + ".";
-        }
-      }
-      if (imported.deferred > 0) {
-        message += " " + imported.deferred + " deferred (five changed PDFs per run).";
-        if (Array.isArray(imported.deferredKeys) && imported.deferredKeys.length) {
-          message += " Next: " + imported.deferredKeys.slice(0, 5).join(", ") + ".";
-        }
-        message += " Run Import & refresh again after the one-minute cooldown.";
-      }
-      if (imported.scanned === 0) {
-        message += " No PDFs found: verify the R2 object keys begin with pdfs/ and end with .pdf.";
-      } else if (!imported.created && !imported.updated && !imported.failed && !imported.deferred) {
-        message += " No new PDF imports were needed. If an upload is missing, check its R2 key is under pdfs/ with a .pdf extension.";
-      }
-      elements.status.textContent = message;
     }
     elements.status.hidden = false;
   } catch (error) {
