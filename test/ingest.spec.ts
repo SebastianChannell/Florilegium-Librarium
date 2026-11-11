@@ -195,6 +195,32 @@ describe("New R2 PDF -> Supabase draft -> explicit publication", () => {
     });
   });
 
+  it("reports safe per-file error details if Supabase refuses a draft insert", async () => {
+    const { bucket } = setup();
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (init?.method === "GET") {
+        if (path.endsWith("/authors")) return Response.json([{ id: "author-1", name: "Fr. Example" }]);
+        if (path.endsWith("/classifications")) return Response.json([{ id: "class-1", class: "Theologia" }]);
+        if (path.endsWith("/books")) return Response.json([]);
+      }
+      if (init?.method === "POST" && path.endsWith("/books")) {
+        return Response.json({ message: "Sensitive details from server" }, { status: 403 });
+      }
+      throw new Error("Unexpected request " + path);
+    }));
+
+    const summary = await ingestLibrary(bucket, SECRET, config);
+    expect(summary).toMatchObject({
+      scanned: 1, newCandidates: 1, created: 0, failed: 1,
+      failures: [{
+        key: "pdfs/the-parish-catechism.pdf",
+        reason: "Supabase rejected the write (HTTP 403)",
+      }],
+    });
+    expect(JSON.stringify(summary)).not.toContain("Sensitive details from server");
+  });
+
   it("only publishes after manual Status change, and never overwrites reviewed metadata", async () => {
     const { bucket, books, objects } = setup();
     await ingestLibrary(bucket, SECRET, config);
