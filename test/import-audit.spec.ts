@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { auditR2Catalog } from "../src/import-audit";
 
-const URL = "https://gqqzogtrywuvomzmapgf.supabase.co";
+const API_URL = "https://gqqzogtrywuvomzmapgf.supabase.co";
 const KEY = "sb_secret_test_only";
 afterEach(() => vi.unstubAllGlobals());
 
@@ -30,7 +30,7 @@ describe("R2 and Supabase catalog reconciliation", () => {
       list: async () => ({ objects, truncated: false }),
     } as unknown as R2Bucket;
 
-    const report = await auditR2Catalog(bucket, KEY, URL, "pdfs/");
+    const report = await auditR2Catalog(bucket, KEY, API_URL, "pdfs/");
     expect(report).toMatchObject({
       r2PdfCount: 4,
       supabaseBookCount: 3,
@@ -51,6 +51,6 @@ describe("R2 and Supabase catalog reconciliation", () => {
       Response.json({ error: "Rejected" }, { status: 401 }),
     ));
     const bucket = { list: async () => ({ objects: [{ key: "pdfs/private-draft.pdf" }], truncated: false }) } as unknown as R2Bucket;
-    await expect(auditR2Catalog(bucket, KEY, URL, "pdfs/")).rejects.toThrow(/Supabase books HTTP 401/);
+    await expect(auditR2Catalog(bucket, KEY, API_URL, "pdfs/")).rejects.toThrow(/Supabase books HTTP 401/);
   });
 });
