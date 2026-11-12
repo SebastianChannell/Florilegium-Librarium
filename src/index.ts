@@ -14,7 +14,7 @@ const MANUAL_REFRESH_KEY_HASH = "66deace57b2e4e43ab11d58cf7f29660d0dd97216ed19e6
 const MANUAL_RESEED_LAST_KEY = "system/librarium/last-manual-reseed";
 const MANUAL_REFRESH_COOLDOWN_MS = 60_000;
 const API_CACHE_SECONDS = 300;
-const API_CACHE_VERSION = "11";
+const API_CACHE_VERSION = "12";
 const PDF_EXTENSION = /\.pdf$/i;
 
 const SMALL_WORDS = new Set([
@@ -585,6 +585,7 @@ export function collectionFromObjectKey(key: string, prefix: string): string {
 function normalizeSlug(value: string): string {
   return safeDecodeURIComponent(value)
     .toLocaleLowerCase("en-US")
+    .replace(/['’]/g, "")
     .replace(/[_\s]+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
